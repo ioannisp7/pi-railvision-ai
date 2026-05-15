@@ -13,7 +13,7 @@ Setup test:
 - Set camera view at a rails part
 - Camera movement during run will break the test
 - Start with NO train inside zone
-- Seep lighting stable
+- Keep lighting stable
 - Avoid moving hand/objects in frame
 
 Run python script test3_background_subtraction.py
@@ -34,3 +34,12 @@ STEP 7 — Count white pixels
 STEP 8 — Decide occupancy
 
 Until now, verified: camera-based virtual occupancy detection
+
+3. Image noise cleanup
+Setup the same test as 2. and run python script test4_remove_noise.py
+
+4. Code refactoring
+Setup the same test as 2. and 3. and run python script test5_refactored.py
+In script added the capability to easy enable/disable image cleanup. Perform tests with both settings by changing
+line 28 to True/False
+

@@ -1,6 +1,4 @@
-# Script starts live camera preview and waits B key from user to set a background image.
-# Then it shows overlayed detection zones and occupancy text and in a second window shows
-# foreground mask for troubleshooting purposes
+# The same as previous test "test3_background_subtraction.py" with noise reduction in captured images.
 from picamera2 import Picamera2
 import cv2
 import numpy as np
@@ -123,12 +121,34 @@ while True:
         )
 
         # -------------------------------------------------
+        # CLEANUP FILTER
+        # -------------------------------------------------
+
+        # Create small kernel matrix
+        #
+        # Kernel size:
+        # 5x5 pixels
+        #
+        kernel = np.ones((5, 5), np.uint8)
+
+        # Morphological opening:
+        #
+        # Removes tiny white noise pixels
+        # while keeping larger shapes
+        #
+        cleanMask = cv2.morphologyEx(
+            thresh,
+            cv2.MORPH_OPEN,
+            kernel
+        )
+
+        # -------------------------------------------------
         # EXTRACT ONLY DETECTION ZONE
         # -------------------------------------------------
 
         # Crop threshold image
         # to only the virtual railway zone
-        zoneMask = thresh[y:y+h, x:x+w]
+        zoneMask = cleanMask[y:y+h, x:x+w]
 
 
         # -------------------------------------------------
@@ -163,7 +183,8 @@ while True:
         # SHOW DEBUG MASK
         # -------------------------------------------------
 
-        cv2.imshow("Threshold Mask", thresh)
+        cv2.imshow("Threshold Mask", cleanMask)
+        cv2.moveWindow("Threshold Mask", 1400, 50)
 
     # =====================================================
     # DRAW VISUAL OVERLAYS
@@ -197,6 +218,7 @@ while True:
     # =====================================================
 
     cv2.imshow("Railway Vision", frame)
+    cv2.moveWindow("Railway Vision", 50, 50)
 
     # =====================================================
     # KEYBOARD INPUT

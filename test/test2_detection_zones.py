@@ -30,6 +30,7 @@ while True:
     x, y, w, h = zone
 
     # Draw rectangle
+    # Last argument "2" is used for thickness
     cv2.rectangle(
         frame,
         (x, y),
@@ -39,6 +40,7 @@ while True:
     )
 
     # Zone label
+    # Last argument "2" is used for thickness
     cv2.putText(
         frame,
         "CROSSING_ZONE",
@@ -50,6 +52,7 @@ while True:
     )
 
     # Fake occupancy text for now
+    # Last argument "2" is used for thickness
     cv2.putText(
         frame,
         "FREE",
@@ -64,6 +67,7 @@ while True:
     cv2.imshow("Railway Vision", frame)
 
     # Quit with Q
+    # 0xFF = Keep only 8 bits for keyboard key value and not extra keyboard metadata
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
