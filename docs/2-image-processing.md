@@ -43,3 +43,6 @@ Setup the same test as 2. and 3. and run python script test5_refactored.py
 In script added the capability to easy enable/disable image cleanup. Perform tests with both settings by changing
 line 28 to True/False
 
+5. Add multiple zones
+Setup the same test as before and run python script test6_multiple_zones.py.
+Zones are defined in a list of dictionaries and any number of zones can be defined as items in the list. Each zone as a dictionary have the required attributes.

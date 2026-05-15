@@ -1,5 +1,5 @@
 # Script starts live camera preview and waits B key from user to set a background image.
-# Then it shows overlayed detection zones and occupancy text and in a second window shows
+# Then it shows overlayed detection zone and occupancy text and in a second window shows
 # foreground mask for troubleshooting purposes
 from picamera2 import Picamera2
 import cv2

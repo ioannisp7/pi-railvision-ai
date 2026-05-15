@@ -1,4 +1,7 @@
-# The same code as "test4_remove_noise.py" refactored with functions and easy enable/disable image cleanup
+# Script starts live camera preview and waits B key from user to set a background image.
+# Then it shows overlayed detection zones and occupancy text and in a second window shows
+# foreground mask for troubleshooting purposes. Any number of zones can be added. S key
+# stops image rendering for freeing up CPU.
 from picamera2 import Picamera2
 import cv2
 import numpy as np
@@ -11,10 +14,20 @@ import numpy as np
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
-# Detection zone
+# Detection zones
 # Format:
 # (x, y, width, height)
-ZONE = (400, 250, 300, 120)
+ZONES = [
+
+    {
+        "name": "CROSSING_A",
+        "rect": (400, 250, 300, 120)
+    },
+    {
+        "name": "STATION_B",
+        "rect": (750, 250, 300, 120)
+    }
+]
 
 # Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
 # Larger value = less sensitive
@@ -34,9 +47,6 @@ KERNEL_SIZE = 5
 
 # Show debug windows
 windowsEnabled = True
-
-# Zone names
-ZONE_NAME = "CROSSING_A"
 
 
 # =========================================================
@@ -209,13 +219,6 @@ while True:
     gray = convert_to_grayscale(frame)
 
     # -----------------------------------------------------
-    # DEFAULT STATUS
-    # -----------------------------------------------------
-
-    occupied = False
-    status = "PRESS B TO CAPTURE BACKGROUND"
-
-    # -----------------------------------------------------
     # RUN DETECTION ONLY IF BACKGROUND EXISTS
     # -----------------------------------------------------
 
@@ -231,35 +234,43 @@ while True:
         if USE_CLEANUP:
             mask = cleanup_mask(mask)
 
-        # Extract only detection zone
-        zoneMask = extract_zone(mask, ZONE)
+        for zoneData in ZONES:
+            zoneRect = zoneData["rect"]
+            # Extract only detection zone
+            zoneMask = extract_zone(mask, zoneRect)
+            occupied, _ = check_occupancy(zoneMask)
 
-        # Check occupancy.
-        # occupancyPixels is dropped, if needed for debugging and tuning to understand threshold tuning, noise levels,
-        # train sizes
-        # status = f"OCCUPIED ({occupancyPixels})"
-        occupied, _ = check_occupancy(zoneMask)
+            # Create status text
+            if occupied:
+                status = "OCCUPIED"
+                print(zoneData["name"] + " is occupied")
+            else:
+                status = "FREE"
 
-        # Create status text
-        if occupied:
-            status = "OCCUPIED"
-        else:
-            status = "FREE"
+            # Draw overlays
+            if windowsEnabled:
+
+                draw_overlay(
+                    frame,
+                    zoneRect,
+                    zoneData["name"],
+                    occupied,
+                    status
+                )
 
 
     if windowsEnabled:
-
-        # -----------------------------------------------------
-        # DRAW OVERLAYS
-        # -----------------------------------------------------
-
-        draw_overlay(
-            frame,
-            ZONE,
-            ZONE_NAME,
-            occupied,
-            status
-        )
+        
+        message = "Press B to capture background, S to stop live preview, Q to quit"
+        cv2.putText(
+        frame,
+        message,
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (0, 255, 255),
+        2
+    )
 
         # -----------------------------------------------------
         # SHOW CAMERA WINDOW
