@@ -1,7 +1,4 @@
-# Script starts live camera preview and waits B key from user to set a background image.
-# Then it shows overlayed detection zones and occupancy text and in a second window shows
-# foreground mask for troubleshooting purposes. Any number of zones can be added. S key
-# stops image rendering for freeing up CPU.
+# Added the ability to set zones in every quadrilateral shape
 from picamera2 import Picamera2
 import cv2
 import numpy as np
@@ -14,20 +11,51 @@ import numpy as np
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
-# Detection zones
-# Format:
-# (x, y, width, height)
+# Detection zones. Provide coordinates for each of the 4 points
 ZONES = [
 
     {
         "name": "CROSSING_A",
-        "rect": (400, 250, 300, 120)
+        "points": [
+            [400, 250],
+            [700, 250],
+            [700, 370],
+            [400, 370]
+        ],
+        "occupied": False,
+        "previousOccupied": False
     },
+
     {
         "name": "STATION_B",
-        "rect": (750, 250, 300, 120)
+        "points": [
+            [750, 250],
+            [1050, 250],
+            [1050, 370],
+            [750, 370]
+        ],
+        "occupied": False,
+        "previousOccupied": False
     }
 ]
+
+
+ui_state = {
+
+    # Mouse state
+    "mouseX": 0,
+    "mouseY": 0,
+
+    # Selected zone
+    "selected_zone_index": 0,
+
+    # GUI visibility
+    "show_mask": True,
+
+    # Application state
+    "windows_enabled": True,
+    "detection_enabled": False
+}
 
 # Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
 # Larger value = less sensitive
@@ -67,24 +95,6 @@ def initialize_camera():
     picam2.start()
 
     return picam2
-
-# =========================================================
-# Draw help test on the screen
-# =========================================================
-
-def draw_help_text(frame):
-
-    message = "B: capture background | A: arm detection | S: stop preview | Q: quit"
-
-    cv2.putText(
-        frame,
-        message,
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (0, 255, 255),
-        2
-    )
 
 
 # =========================================================
@@ -145,13 +155,28 @@ def cleanup_mask(mask):
 # EXTRACT ZONE FROM IMAGE
 # =========================================================
 
-def extract_zone(image, zone):
-    x, y, w, h = zone
+def extract_zone(mask, points):
 
-    # Crop image to zone area
-    zoneImage = image[y:y+h, x:x+w]
+    # Create empty black mask
+    polygonMask = np.zeros_like(mask)
 
-    return zoneImage
+    # Convert coordinates to integer format
+    points = np.int32(points)
+
+    # Draw filled polygon
+    cv2.fillPoly(
+        polygonMask,
+        [points],
+        255
+    )
+
+    # Keep only pixels inside polygon
+    result = cv2.bitwise_and(
+        mask,
+        polygonMask
+    )
+
+    return result
 
 
 # =========================================================
@@ -170,11 +195,46 @@ def check_occupancy(zoneMask):
 
 
 # =========================================================
-# DRAW OVERLAYS
+# PROCESS ALL ZONES
 # =========================================================
 
-def draw_overlay(frame, zone, zoneName, occupied, status):
-    x, y, w, h = zone
+def process_all_zones(mask):
+
+    for zoneData in ZONES:
+        zonePoints = zoneData["points"]
+        # Extract only detection zone area
+        zoneMask = extract_zone(mask, zonePoints)
+
+        # While detection is disarmed continue to next loop
+        if not detectionEnabled:
+            zoneData["occupied"] = False
+            continue
+
+        # When detection is armed
+        # Check occupance status
+        occupied, occupancyPixels = check_occupancy(zoneMask)
+        # Store previous state of Zone's occupied status to check if changed
+        previousOccupied = zoneData["occupied"]
+        # Current state of Zone's occupied status
+        zoneData["occupied"] = occupied
+
+        # Check if occupancy changed
+        # ENTER event
+        if not previousOccupied and occupied:
+            print("Train ENTERED " + zoneData["name"])
+
+        # EXIT event
+        if previousOccupied and not occupied:
+            print("Train EXITED " + zoneData["name"])
+
+
+# =========================================================
+# DRAW ZONE OVERLAYS
+# =========================================================
+
+def draw_zone_ovelays(frame, points, zoneName, occupied, status):
+
+    points = np.int32(points)
 
     # Choose color
     if occupied:
@@ -182,36 +242,133 @@ def draw_overlay(frame, zone, zoneName, occupied, status):
     else:
         color = (0, 255, 0)
 
-    # Draw rectangle
-    cv2.rectangle(
+    # Draw polygon outline
+    cv2.polylines(
         frame,
-        (x, y),
-        (x + w, y + h),
+        [points],
+        True,
         color,
         2
     )
 
-    # Draw zone name text
+    # Use first point for text anchor
+    textX = points[0][0]
+    textY = points[0][1]
+
+    # Draw zone name
     cv2.putText(
         frame,
         zoneName,
-        (x, y - 10),
+        (textX, textY - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
         color,
         2
     )
 
-    # Draw status text
+    # Draw status
     cv2.putText(
         frame,
         status,
-        (x, y + h + 30),
+        (textX, textY + 25),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
+        0.7,
         color,
         2
     )
+
+
+# =========================================================
+# Draw help test on the screen
+# =========================================================
+
+
+def draw_help_text(frame, ui_state):
+
+    message = "B: capture background | A: arm detection | S: stop preview | Q: quit"
+
+    cv2.putText(
+        frame,
+        message,
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (0, 255, 255),
+        2
+    )
+
+    mouseText = (f"Mouse: {ui_state['mouseX']}, {ui_state['mouseY']}"
+)
+
+    cv2.putText(
+        frame,
+        mouseText,
+        (10, 60),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 0),
+        2
+    )
+
+
+# =========================================================
+# MOUSE CALLBACK
+# =========================================================
+
+def mouse_callback(event, x, y, flags, ui_state):
+
+    # Left mouse button click
+    if event == cv2.EVENT_LBUTTONDOWN:
+        ui_state["mouseX"] = x
+        ui_state["mouseY"] = y
+        print(f"Mouse click: x={x}, y={y}")
+
+
+# =========================================================
+# DRAW GUI
+# =========================================================
+
+def draw_gui(frame, mask):
+    global railwayWindowInitialized
+    global maskWindowInitialized
+
+    # Draw GUI only if debug windows are enabled
+    if not windowsEnabled:
+        return
+
+    # Draw all zones
+    for zoneData in ZONES:
+        if zoneData["occupied"]:
+            status = "OCCUPIED"
+        else:
+            status = "FREE"
+
+        draw_zone_ovelays(
+            frame,
+            zoneData["points"],
+            zoneData["name"],
+            zoneData["occupied"],
+            status
+        )
+
+    # Draw help text
+    draw_help_text(frame, ui_state)
+
+    # Main camera window
+    cv2.imshow("Railway Vision", frame)
+    if not railwayWindowInitialized:
+        cv2.moveWindow("Railway Vision",50,50)
+        railwayWindowInitialized = True
+
+    # Threshold mask window
+    if backgroundFrame is not None and detectionEnabled and mask is not None:
+        cv2.imshow("Threshold Mask",mask)
+        if not maskWindowInitialized:
+            cv2.moveWindow("Threshold Mask",1400,50)
+            maskWindowInitialized = True
+    
+    # Mouse callback
+    cv2.setMouseCallback("Railway Vision", mouse_callback, ui_state)
 
 
 # =========================================================
@@ -220,9 +377,11 @@ def draw_overlay(frame, zone, zoneName, occupied, status):
 
 picam2 = initialize_camera()
 
+# Initialise variables
 backgroundFrame = None
 railwayWindowInitialized = False
 maskWindowInitialized = False
+mask = None
 
 while True:
 
@@ -253,59 +412,10 @@ while True:
         # Optional cleanup
         if USE_CLEANUP:
             mask = cleanup_mask(mask)
-
-        for zoneData in ZONES:
-            zoneRect = zoneData["rect"]
-            # Extract only detection zone
-            zoneMask = extract_zone(mask, zoneRect)
-            # Check occupation after arming detection
-            if detectionEnabled:
-                occupied, _ = check_occupancy(zoneMask)
-            else:
-                occupied = False
-
-            # Create status text
-            if occupied:
-                status = "OCCUPIED"
-                print(zoneData["name"] + " is occupied")
-            else:
-                status = "FREE"
-
-            # Draw overlays
-            if windowsEnabled:
-
-                draw_overlay(
-                    frame,
-                    zoneRect,
-                    zoneData["name"],
-                    occupied,
-                    status
-                )
-
-
-    if windowsEnabled:
         
-        draw_help_text(frame)
+        process_all_zones(mask)
 
-        # -----------------------------------------------------
-        # SHOW CAMERA WINDOW
-        # -----------------------------------------------------
-
-        cv2.imshow("Railway Vision", frame)
-        if not railwayWindowInitialized:
-            cv2.moveWindow("Railway Vision", 50, 50)
-            railwayWindowInitialized = True
-
-        # -----------------------------------------------------
-        # SHOW MASK WINDOW
-        # -----------------------------------------------------
-
-        if backgroundFrame is not None and detectionEnabled:
-            cv2.imshow("Threshold Mask", mask)
-            if not maskWindowInitialized:
-                cv2.moveWindow("Threshold Mask", 1400, 50)
-                maskWindowInitialized = True
-
+    draw_gui(frame, mask)
 
     # -----------------------------------------------------
     # KEYBOARD INPUT

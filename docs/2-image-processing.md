@@ -46,3 +46,6 @@ line 28 to True/False
 5. Add multiple zones
 Setup the same test as before and run python script test6_multiple_zones.py.
 Zones are defined in a list of dictionaries and any number of zones can be defined as items in the list. Each zone as a dictionary have the required attributes.
+
+6. Setup the same test as before and run python script test7_polygon_zones.py.
+Zones now can be in any quadrilateral shape
