@@ -1,7 +1,9 @@
-# Added the ability to set zones in every quadrilateral shape
+# Added GUI
 from picamera2 import Picamera2
 import cv2
 import numpy as np
+import tkinter as tk
+from tkinter import ttk
 
 # =========================================================
 # Variables Configuration
@@ -13,7 +15,6 @@ FRAME_HEIGHT = 720
 
 # Detection zones. Provide coordinates for each of the 4 points
 ZONES = [
-
     {
         "name": "CROSSING_A",
         "points": [
@@ -25,7 +26,6 @@ ZONES = [
         "occupied": False,
         "previousOccupied": False
     },
-
     {
         "name": "STATION_B",
         "points": [
@@ -39,9 +39,7 @@ ZONES = [
     }
 ]
 
-
 ui_state = {
-
     # Mouse state
     "mouseX": 0,
     "mouseY": 0,
@@ -57,18 +55,6 @@ ui_state = {
     # Start with detection disarmed
     "detection_enabled": False
 }
-
-BUTTONS = {
-    # Buttons format (x, y, width, height)
-    "capture_background": (20, 20, 250, 50),
-    "arm_detection": (20, 90, 250, 50),
-    "quit": (20, 160, 250, 50)
-
-}
-
-# GUI panel size
-GUI_WIDTH = 400
-GUI_HEIGHT = 720
 
 # Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
 # Larger value = less sensitive
@@ -98,9 +84,7 @@ def initialize_camera():
             main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}
         )
     )
-
     picam2.start()
-
     return picam2
 
 
@@ -112,7 +96,6 @@ def convert_to_grayscale(frame):
     # Convert color image to grayscale
     # Easier and faster for image comparison
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
     return gray
 
 
@@ -128,7 +111,6 @@ def create_difference_mask(backgroundFrame, grayFrame):
     # Convert grayscale difference image into:
     # BLACK = no important change
     # WHITE = significant change
-
     _, thresh = cv2.threshold(
         diff,
         DIFF_THRESHOLD,
@@ -163,7 +145,6 @@ def cleanup_mask(mask):
 # =========================================================
 
 def extract_zone(mask, points):
-
     # Create empty black mask
     polygonMask = np.zeros_like(mask)
 
@@ -193,10 +174,8 @@ def extract_zone(mask, points):
 def check_occupancy(zoneMask):
     # Count white pixels inside zone
     occupancyPixels = cv2.countNonZero(zoneMask)
-
     # Convert result to True/False
     occupied = occupancyPixels > OCCUPANCY_THRESHOLD
-
     # occupancyPixels variable is dropped after returned. It is returned here for debugging and tuning
     return occupied, occupancyPixels
 
@@ -206,7 +185,6 @@ def check_occupancy(zoneMask):
 # =========================================================
 
 def process_all_zones(mask, ui_state):
-
     for zoneData in ZONES:
         zonePoints = zoneData["points"]
         # Extract only detection zone area
@@ -240,7 +218,6 @@ def process_all_zones(mask, ui_state):
 # =========================================================
 
 def draw_zone_ovelays(frame, points, zoneName, occupied, status):
-
     points = np.int32(points)
 
     # Choose color
@@ -289,23 +266,8 @@ def draw_zone_ovelays(frame, points, zoneName, occupied, status):
 # Draw help test on the screen
 # =========================================================
 
-
-def draw_help_text(frame, ui_state):
-
-    message = "B: capture background | A: arm detection | S: stop preview | Q: quit"
-
-    cv2.putText(
-        frame,
-        message,
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (0, 255, 255),
-        2
-    )
-
-    mouseText = (f"Mouse: {ui_state['mouseX']}, {ui_state['mouseY']}"
-)
+def draw_mouse_coordinates(frame, ui_state):
+    mouseText = (f"Mouse: {ui_state['mouseX']}, {ui_state['mouseY']}")
 
     cv2.putText(
         frame,
@@ -323,106 +285,11 @@ def draw_help_text(frame, ui_state):
 # =========================================================
 
 def mouse_callback(event, x, y, flags, ui_state):
-
     # Left mouse button click
     if event == cv2.EVENT_LBUTTONDOWN:
         ui_state["mouseX"] = x
         ui_state["mouseY"] = y
         print(f"Mouse click: x={x}, y={y}")
-
-
-# =========================================================
-# CREATE GUI PANEL
-# =========================================================
-
-def create_gui_panel():
-
-    # Dark gray background
-    panel = np.zeros((GUI_HEIGHT, GUI_WIDTH, 3), dtype=np.uint8)
-
-    # BGR color coding
-    panel[:] = (40, 40, 40)
-
-    return panel
-
-
-# =========================================================
-# DRAW BUTTON
-# =========================================================
-
-def draw_button(panel, rect, text, color):
-
-    x, y, w, h = rect
-
-    # Button background
-    cv2.rectangle(
-        panel,
-        (x, y),
-        (x + w, y + h),
-        color,
-        -1
-    )
-
-    # Button border
-    cv2.rectangle(
-        panel,
-        (x, y),
-        (x + w, y + h),
-        (255, 255, 255),
-        2
-    )
-
-    # Button text
-    cv2.putText(
-        panel,
-        text,
-        (x + 15, y + 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 255),
-        2
-    )
-
-
-# =========================================================
-# DRAW GUI PANEL CONTENT
-# =========================================================
-
-def draw_gui_panel(panel):
-
-    # Title
-    cv2.putText(
-        panel,
-        "Railway Control Panel",
-        (20, 300),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
-
-    # Buttons
-    draw_button(
-        panel,
-        BUTTONS["capture_background"],
-        "Capture Background",
-        # BGR color coding
-        (80, 80, 200)
-    )
-
-    draw_button(
-        panel,
-        BUTTONS["arm_detection"],
-        "Arm Detection",
-        (80, 150, 80)
-    )
-
-    draw_button(
-        panel,
-        BUTTONS["quit"],
-        "Quit",
-        (80, 80, 200)
-    )
 
 
 # =========================================================
@@ -432,7 +299,7 @@ def draw_gui_panel(panel):
 def draw_gui(frame, mask, ui_state):
     global railwayWindowInitialized
     global maskWindowInitialized
-
+    
     # Draw GUI only if debug windows are enabled
     if not ui_state["windows_enabled"]:
         return
@@ -451,23 +318,9 @@ def draw_gui(frame, mask, ui_state):
             zoneData["occupied"],
             status
         )
-    
-    # Create GUI panel
-    panel = create_gui_panel()
-
-    # Draw GUI controls
-    draw_gui_panel(panel)
-
-    # Show GUI panel
-    cv2.imshow("Control Panel", panel)
-
-    cv2.setMouseCallback(
-        "Control Panel",
-        gui_mouse_callback
-    )
 
     # Draw help text
-    draw_help_text(frame, ui_state)
+    draw_mouse_coordinates(frame, ui_state)
 
     # Main camera window
     cv2.imshow("Railway Vision", frame)
@@ -487,39 +340,33 @@ def draw_gui(frame, mask, ui_state):
 
 
 # =========================================================
-# GUI PANEL CALLBACK
+# GUI BUTTON FUNCTIONS
 # =========================================================
 
-def gui_mouse_callback(event, x, y, flags, param):
-
+def capture_background():
     global backgroundFrame
-    global detectionEnabled
+    global gray
+    backgroundFrame = gray.copy()
+    print("Background reference captured")
 
-    if event != cv2.EVENT_LBUTTONDOWN:
-        return
 
-    # Capture background button
-    bx, by, bw, bh = BUTTONS["capture_background"]
+def arm_detection():
+    ui_state["detection_enabled"] = True
+    print("Occupancy detection armed")
 
-    if bx <= x <= bx + bw and by <= y <= by + bh:
-        backgroundFrame = gray.copy()
-        print("Background reference captured")
-        return
 
-    # Arm detection button
-    bx, by, bw, bh = BUTTONS["arm_detection"]
+def stop_preview():
+    ui_state["windows_enabled"] = False
+    cv2.destroyAllWindows()
+    print("Preview disabled")
 
-    if bx <= x <= bx + bw and by <= y <= by + bh:
-        detectionEnabled = True
-        print("Occupancy detection armed")
-        return
 
-    # Quit button
-    bx, by, bw, bh = BUTTONS["quit"]
-
-    if bx <= x <= bx + bw and by <= y <= by + bh:
-        print("Exiting")
-        exit()
+def quit_program():
+    global running
+    running = False
+    cv2.destroyAllWindows()
+    root.destroy()
+    print("Exiting")
 
 
 # =========================================================
@@ -534,7 +381,63 @@ railwayWindowInitialized = False
 maskWindowInitialized = False
 mask = None
 
-while True:
+
+# =========================================================
+# TKINTER GUI
+# =========================================================
+root = tk.Tk()
+root.title("Railway Control Panel")
+root.geometry("400x500")
+
+# =========================================================
+# TKINTER BUTTONS
+# =========================================================
+
+captureButton = tk.Button(
+    root,
+    text="Capture Background",
+    command=capture_background,
+    height=2,
+    width=25
+    )
+
+captureButton.pack(pady=10)
+
+
+armButton = tk.Button(
+    root,
+    text="Arm Detection",
+    command=arm_detection,
+    height=2,
+    width=25
+    )
+
+armButton.pack(pady=10)
+
+
+stopButton = tk.Button(
+    root,
+    text="Stop Preview",
+    command=stop_preview,
+    height=2,
+    width=25
+    )
+
+stopButton.pack(pady=10)
+
+quitButton = tk.Button(
+    root,
+    text="Quit",
+    command=quit_program,
+    height=2,
+    width=25
+    )
+
+quitButton.pack(pady=10)
+
+running = True
+
+while running:
 
     # -----------------------------------------------------
     # CAPTURE FRAME
@@ -568,35 +471,13 @@ while True:
 
     draw_gui(frame, mask, ui_state)
 
-    # -----------------------------------------------------
-    # KEYBOARD INPUT
-    # -----------------------------------------------------
+    root.update()
 
-    key = cv2.waitKey(1) & 0xFF
-
-    # Capture background reference
-    if key == ord('b'):
-        backgroundFrame = gray.copy()
-        print("Background reference captured")
-
-    # Arm occupancy detection
-    if key == ord('a'):
-        ui_state["detection_enabled"] = True
-        print("Occupancy detection armed")
-    
-    # Hide debug windows
-    if key == ord('s'):
-        ui_state["windows_enabled"] = False
-        print("Debug windows disabled")
-
-    # Quit program
-    if key == ord('q'):
-        print("Exiting")
-        break
-
+    cv2.waitKey(1)
 
 # =========================================================
 # CLEANUP
 # =========================================================
 
 cv2.destroyAllWindows()
+picam2.stop()
