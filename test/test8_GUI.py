@@ -3,7 +3,9 @@ from picamera2 import Picamera2
 import cv2
 import numpy as np
 import tkinter as tk
-from tkinter import ttk
+from time import sleep
+import json
+from tkinter import filedialog
 
 # =========================================================
 # Variables Configuration
@@ -24,7 +26,6 @@ ZONES = [
             [400, 370]
         ],
         "occupied": False,
-        "previousOccupied": False
     },
     {
         "name": "STATION_B",
@@ -35,7 +36,6 @@ ZONES = [
             [750, 370]
         ],
         "occupied": False,
-        "previousOccupied": False
     }
 ]
 
@@ -53,7 +53,17 @@ ui_state = {
     # Show debug windows
     "windows_enabled": True,
     # Start with detection disarmed
-    "detection_enabled": False
+    "detection_enabled": False,
+
+    # Initialization of the windows
+    "railway_window_initialized": False,
+    "mask_window_initialized": False
+}
+
+app_state = {
+    "background_frame": None,
+    "mask": None,
+    "gray_frame": None
 }
 
 # Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
@@ -95,18 +105,17 @@ def initialize_camera():
 def convert_to_grayscale(frame):
     # Convert color image to grayscale
     # Easier and faster for image comparison
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return gray
+    app_state["gray_frame"] = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 
 # =========================================================
 # CREATE DIFFERENCE MASK
 # =========================================================
 
-def create_difference_mask(backgroundFrame, grayFrame):
+def create_difference_mask():
     # Compare current image against background reference
     # Bright pixels = changed areas
-    diff = cv2.absdiff(backgroundFrame, grayFrame)
+    diff = cv2.absdiff(app_state["background_frame"], app_state["gray_frame"])
 
     # Convert grayscale difference image into:
     # BLACK = no important change
@@ -125,14 +134,14 @@ def create_difference_mask(backgroundFrame, grayFrame):
 # CLEANUP MASK
 # =========================================================
 
-def cleanup_mask(mask):
+def cleanup_mask():
     # Create kernel matrix
     kernel = np.ones((KERNEL_SIZE, KERNEL_SIZE), np.uint8)
 
     # Morphological opening:
     # removes small white noise
     cleanMask = cv2.morphologyEx(
-        mask,
+        app_state["mask"],
         cv2.MORPH_OPEN,
         kernel
     )
@@ -144,9 +153,9 @@ def cleanup_mask(mask):
 # EXTRACT ZONE FROM IMAGE
 # =========================================================
 
-def extract_zone(mask, points):
+def extract_zone(points):
     # Create empty black mask
-    polygonMask = np.zeros_like(mask)
+    polygonMask = np.zeros_like(app_state["mask"])
 
     # Convert coordinates to integer format
     points = np.int32(points)
@@ -160,7 +169,7 @@ def extract_zone(mask, points):
 
     # Keep only pixels inside polygon
     result = cv2.bitwise_and(
-        mask,
+        app_state["mask"],
         polygonMask
     )
 
@@ -184,11 +193,11 @@ def check_occupancy(zoneMask):
 # PROCESS ALL ZONES
 # =========================================================
 
-def process_all_zones(mask, ui_state):
+def process_all_zones():
     for zoneData in ZONES:
         zonePoints = zoneData["points"]
         # Extract only detection zone area
-        zoneMask = extract_zone(mask, zonePoints)
+        zoneMask = extract_zone(zonePoints)
 
         # While detection is disarmed continue to next loop
         if not ui_state["detection_enabled"]:
@@ -217,7 +226,7 @@ def process_all_zones(mask, ui_state):
 # DRAW ZONE OVERLAYS
 # =========================================================
 
-def draw_zone_ovelays(frame, points, zoneName, occupied, status):
+def draw_zone_overlays(frame, points, zoneName, occupied, status):
     points = np.int32(points)
 
     # Choose color
@@ -263,10 +272,10 @@ def draw_zone_ovelays(frame, points, zoneName, occupied, status):
 
 
 # =========================================================
-# Draw help test on the screen
+# Draw mouse coordinates on screen
 # =========================================================
 
-def draw_mouse_coordinates(frame, ui_state):
+def draw_mouse_coordinates(frame):
     mouseText = (f"Mouse: {ui_state['mouseX']}, {ui_state['mouseY']}")
 
     cv2.putText(
@@ -284,7 +293,7 @@ def draw_mouse_coordinates(frame, ui_state):
 # MOUSE CALLBACK
 # =========================================================
 
-def mouse_callback(event, x, y, flags, ui_state):
+def mouse_callback(event, x, y, flags, param):
     # Left mouse button click
     if event == cv2.EVENT_LBUTTONDOWN:
         ui_state["mouseX"] = x
@@ -296,10 +305,7 @@ def mouse_callback(event, x, y, flags, ui_state):
 # DRAW GUI
 # =========================================================
 
-def draw_gui(frame, mask, ui_state):
-    global railwayWindowInitialized
-    global maskWindowInitialized
-    
+def draw_gui(frame):    
     # Draw GUI only if debug windows are enabled
     if not ui_state["windows_enabled"]:
         return
@@ -311,7 +317,7 @@ def draw_gui(frame, mask, ui_state):
         else:
             status = "FREE"
 
-        draw_zone_ovelays(
+        draw_zone_overlays(
             frame,
             zoneData["points"],
             zoneData["name"],
@@ -320,23 +326,25 @@ def draw_gui(frame, mask, ui_state):
         )
 
     # Draw help text
-    draw_mouse_coordinates(frame, ui_state)
+    draw_mouse_coordinates(frame)
 
     # Main camera window
     cv2.imshow("Railway Vision", frame)
-    if not railwayWindowInitialized:
+    if not ui_state["railway_window_initialized"]:
         cv2.moveWindow("Railway Vision",50,50)
-        railwayWindowInitialized = True
+        ui_state["railway_window_initialized"] = True
+        # Mouse callback
+        cv2.setMouseCallback("Railway Vision", mouse_callback)
 
     # Threshold mask window
-    if backgroundFrame is not None and ui_state["detection_enabled"] and mask is not None:
-        cv2.imshow("Threshold Mask",mask)
-        if not maskWindowInitialized:
+    if app_state["background_frame"] is not None and ui_state["detection_enabled"] and app_state["mask"] is not None:
+        cv2.imshow("Threshold Mask",app_state["mask"])
+        if not ui_state["mask_window_initialized"]:
             cv2.moveWindow("Threshold Mask",1400,50)
-            maskWindowInitialized = True
+            ui_state["mask_window_initialized"] = True
     
-    # Mouse callback
-    cv2.setMouseCallback("Railway Vision", mouse_callback, ui_state)
+    # # Mouse callback
+    # cv2.setMouseCallback("Railway Vision", mouse_callback)
 
 
 # =========================================================
@@ -344,9 +352,7 @@ def draw_gui(frame, mask, ui_state):
 # =========================================================
 
 def capture_background():
-    global backgroundFrame
-    global gray
-    backgroundFrame = gray.copy()
+    app_state["background_frame"] = app_state["gray_frame"].copy()
     print("Background reference captured")
 
 
@@ -364,9 +370,121 @@ def stop_preview():
 def quit_program():
     global running
     running = False
-    cv2.destroyAllWindows()
-    root.destroy()
     print("Exiting")
+
+
+# =========================================================
+# CREATE TKINTER GUI
+# =========================================================
+
+def create_tkinter_gui():
+
+    root = tk.Tk()
+
+    root.title("Railway Control Panel")
+    root.geometry("400x500")
+
+    captureButton = tk.Button(
+        root,
+        text="Capture Background",
+        command=capture_background,
+        height=2,
+        width=25
+    )
+    captureButton.pack(pady=10)
+
+    armButton = tk.Button(
+        root,
+        text="Arm Detection",
+        command=arm_detection,
+        height=2,
+        width=25
+    )
+    armButton.pack(pady=10)
+
+    stopButton = tk.Button(
+        root,
+        text="Stop Preview",
+        command=stop_preview,
+        height=2,
+        width=25
+    )
+    stopButton.pack(pady=10)
+
+    saveButton = tk.Button(
+        root,
+        text="Save Layout",
+        command=save_layout,
+        height=2,
+        width=25
+    )
+    saveButton.pack(pady=10)
+
+    loadButton = tk.Button(
+        root,
+        text="Load Layout",
+        command=load_layout,
+        height=2,
+        width=25
+    )
+    loadButton.pack(pady=10)
+
+    quitButton = tk.Button(
+        root,
+        text="Quit",
+        command=quit_program,
+        height=2,
+        width=25
+    )
+    quitButton.pack(pady=10)
+
+    return root
+
+
+# =========================================================
+# SAVE LAYOUT
+# =========================================================
+
+def save_layout():
+    filePath = filedialog.asksaveasfilename(
+        defaultextension=".json",
+        filetypes=[("JSON files", "*.json")]
+    )
+
+    if not filePath:
+        return
+
+    layoutData = {
+        "zones": ZONES
+    }
+
+    with open(filePath, "w") as file:
+        json.dump(layoutData, file, indent=4)
+
+    print("Layout saved")
+
+
+# =========================================================
+# LOAD LAYOUT
+# =========================================================
+
+def load_layout():
+    filePath = filedialog.askopenfilename(
+        filetypes=[("JSON files", "*.json")]
+    )
+
+    if not filePath:
+        return
+
+    with open(filePath, "r") as file:
+        layoutData = json.load(file)
+
+    ZONES.clear()
+
+    for zone in layoutData["zones"]:
+        ZONES.append(zone)
+
+    print("Layout loaded")
 
 
 # =========================================================
@@ -375,102 +493,34 @@ def quit_program():
 
 picam2 = initialize_camera()
 
-# Initialise variables
-backgroundFrame = None
-railwayWindowInitialized = False
-maskWindowInitialized = False
-mask = None
-
-
-# =========================================================
-# TKINTER GUI
-# =========================================================
-root = tk.Tk()
-root.title("Railway Control Panel")
-root.geometry("400x500")
-
-# =========================================================
-# TKINTER BUTTONS
-# =========================================================
-
-captureButton = tk.Button(
-    root,
-    text="Capture Background",
-    command=capture_background,
-    height=2,
-    width=25
-    )
-
-captureButton.pack(pady=10)
-
-
-armButton = tk.Button(
-    root,
-    text="Arm Detection",
-    command=arm_detection,
-    height=2,
-    width=25
-    )
-
-armButton.pack(pady=10)
-
-
-stopButton = tk.Button(
-    root,
-    text="Stop Preview",
-    command=stop_preview,
-    height=2,
-    width=25
-    )
-
-stopButton.pack(pady=10)
-
-quitButton = tk.Button(
-    root,
-    text="Quit",
-    command=quit_program,
-    height=2,
-    width=25
-    )
-
-quitButton.pack(pady=10)
-
 running = True
+root = create_tkinter_gui()
 
 while running:
-
-    # -----------------------------------------------------
     # CAPTURE FRAME
-    # -----------------------------------------------------
-
     frame = picam2.capture_array()
 
-    # -----------------------------------------------------
     # CONVERT TO GRAYSCALE
-    # -----------------------------------------------------
+    convert_to_grayscale(frame)
 
-    gray = convert_to_grayscale(frame)
-
-    # -----------------------------------------------------
     # RUN DETECTION ONLY IF BACKGROUND EXISTS
-    # -----------------------------------------------------
-
-    if backgroundFrame is not None:
+    if app_state["background_frame"] is not None:
 
         # Create threshold mask
-        mask = create_difference_mask(
-            backgroundFrame,
-            gray
-        )
+        app_state["mask"] = create_difference_mask()
 
         # Optional cleanup
         if USE_CLEANUP:
-            mask = cleanup_mask(mask)
+            app_state["mask"] = cleanup_mask()
         
-        process_all_zones(mask, ui_state)
+        process_all_zones()
 
-    draw_gui(frame, mask, ui_state)
+    # Limit CPU stress 
+    sleep(0.01)
 
+    draw_gui(frame)
+
+    root.update_idletasks()
     root.update()
 
     cv2.waitKey(1)
@@ -481,3 +531,4 @@ while running:
 
 cv2.destroyAllWindows()
 picam2.stop()
+root.destroy()
