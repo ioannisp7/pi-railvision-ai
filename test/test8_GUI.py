@@ -3,6 +3,7 @@ from picamera2 import Picamera2
 import cv2
 import numpy as np
 import tkinter as tk
+from tkinter import ttk
 from time import sleep
 import json
 from tkinter import filedialog
@@ -11,33 +12,14 @@ from tkinter import filedialog
 # Variables Configuration
 # =========================================================
 
+ADD_NEW_ZONE_OPTION = "ADD NEW ZONE"
+
 # Camera resolution
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
 # Detection zones. Provide coordinates for each of the 4 points
-ZONES = [
-    {
-        "name": "CROSSING_A",
-        "points": [
-            [400, 250],
-            [700, 250],
-            [700, 370],
-            [400, 370]
-        ],
-        "occupied": False,
-    },
-    {
-        "name": "STATION_B",
-        "points": [
-            [750, 250],
-            [1050, 250],
-            [1050, 370],
-            [750, 370]
-        ],
-        "occupied": False,
-    }
-]
+ZONES = []
 
 ui_state = {
     # Mouse state
@@ -46,6 +28,8 @@ ui_state = {
 
     # Selected zone
     "selected_zone_index": 0,
+
+    "active_point_index": None,
 
     # GUI visibility
     "show_mask": True,
@@ -128,6 +112,17 @@ def create_difference_mask():
     )
 
     return thresh
+
+
+# =========================================================
+# SELECTED TEXTBOX
+# =========================================================
+
+def select_point_entry(index):
+
+    ui_state["active_point_index"] = index
+
+    print(f"Selected Point {index + 1}")
 
 
 # =========================================================
@@ -215,11 +210,11 @@ def process_all_zones():
         # Check if occupancy changed
         # ENTER event
         if not previousOccupied and occupied:
-            print("Train ENTERED " + zoneData["name"])
+            add_log("Train ENTERED " + zoneData["name"])
 
         # EXIT event
         if previousOccupied and not occupied:
-            print("Train EXITED " + zoneData["name"])
+            add_log("Train EXITED " + zoneData["name"])
 
 
 # =========================================================
@@ -248,22 +243,13 @@ def draw_zone_overlays(frame, points, zoneName, occupied, status):
     textX = points[0][0]
     textY = points[0][1]
 
-    # Draw zone name
-    cv2.putText(
-        frame,
-        zoneName,
-        (textX, textY - 10),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        color,
-        2
-    )
+    # Draw zone name and status
+    overlayText = f"{zoneName} {status}"
 
-    # Draw status
     cv2.putText(
         frame,
-        status,
-        (textX, textY + 25),
+        overlayText,
+        (textX, textY - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
         color,
@@ -299,6 +285,17 @@ def mouse_callback(event, x, y, flags, param):
         ui_state["mouseX"] = x
         ui_state["mouseY"] = y
         print(f"Mouse click: x={x}, y={y}")
+
+        activeIndex = ui_state["active_point_index"]
+
+        if activeIndex is not None:
+
+            pointEntries[activeIndex].delete(0, tk.END)
+
+            pointEntries[activeIndex].insert(
+                0,
+                f"{x},{y}"
+            )
 
 
 # =========================================================
@@ -348,97 +345,167 @@ def draw_gui(frame):
 
 
 # =========================================================
+# GUI LOG SYSTEM
+# =========================================================
+
+def add_log(message):
+
+    logText.insert(
+        tk.END,
+        message + "\n"
+    )
+
+    # Auto-scroll to latest message
+    logText.see(tk.END)
+
+
+# =========================================================
 # GUI BUTTON FUNCTIONS
 # =========================================================
 
 def capture_background():
+
     app_state["background_frame"] = app_state["gray_frame"].copy()
-    print("Background reference captured")
+
+    armButton.config(
+        state=tk.NORMAL
+    )
+
+    add_log("Background reference captured")
 
 
 def arm_detection():
+
     ui_state["detection_enabled"] = True
-    print("Occupancy detection armed")
+
+    stopButton.config(
+        state=tk.NORMAL
+    )
+
+    add_log("Occupancy detection armed")
 
 
 def stop_preview():
     ui_state["windows_enabled"] = False
     cv2.destroyAllWindows()
-    print("Preview disabled")
+    add_log("Preview disabled")
 
 
 def quit_program():
     global running
     running = False
-    print("Exiting")
+    add_log("Exiting")
 
 
 # =========================================================
-# CREATE TKINTER GUI
+# LOAD ZONE COODINATES IN GUI
 # =========================================================
 
-def create_tkinter_gui():
+def load_zone_into_editor(event=None):
 
-    root = tk.Tk()
+    selectedIndex = zoneSelector.current()
 
-    root.title("Railway Control Panel")
-    root.geometry("400x500")
+    # ADD NEW ZONE selected
+    if selectedIndex >= len(ZONES):
+        ui_state["selected_zone_index"] = -1
 
-    captureButton = tk.Button(
-        root,
-        text="Capture Background",
-        command=capture_background,
-        height=2,
-        width=25
+        zoneNameEntry.delete(0, tk.END)
+
+        for entry in pointEntries:
+            entry.delete(0, tk.END)
+
+        return
+
+    ui_state["selected_zone_index"] = selectedIndex
+
+    zoneData = ZONES[selectedIndex]
+
+    zoneNameEntry.delete(0, tk.END)
+
+    zoneNameEntry.insert(
+        0,
+        zoneData["name"]
     )
-    captureButton.pack(pady=10)
 
-    armButton = tk.Button(
-        root,
-        text="Arm Detection",
-        command=arm_detection,
-        height=2,
-        width=25
-    )
-    armButton.pack(pady=10)
+    for i in range(4):
 
-    stopButton = tk.Button(
-        root,
-        text="Stop Preview",
-        command=stop_preview,
-        height=2,
-        width=25
-    )
-    stopButton.pack(pady=10)
+        x = zoneData["points"][i][0]
+        y = zoneData["points"][i][1]
 
-    saveButton = tk.Button(
-        root,
-        text="Save Layout",
-        command=save_layout,
-        height=2,
-        width=25
-    )
-    saveButton.pack(pady=10)
+        pointEntries[i].delete(0, tk.END)
 
-    loadButton = tk.Button(
-        root,
-        text="Load Layout",
-        command=load_layout,
-        height=2,
-        width=25
-    )
-    loadButton.pack(pady=10)
+        pointEntries[i].insert(
+            0,
+            f"{x},{y}"
+        )
 
-    quitButton = tk.Button(
-        root,
-        text="Quit",
-        command=quit_program,
-        height=2,
-        width=25
-    )
-    quitButton.pack(pady=10)
 
-    return root
+# =========================================================
+# APPLY ZONE COORDINATES CHANGES
+# =========================================================
+
+def apply_zone_changes():
+
+    selectedIndex = zoneSelector.current()
+
+    newZoneName = zoneNameEntry.get()
+
+    newPoints = []
+
+    for i in range(4):
+
+        textValue = pointEntries[i].get()
+
+        splitValues = textValue.split(",")
+
+        x = int(splitValues[0])
+        y = int(splitValues[1])
+
+        newPoints.append([x, y])
+
+    # ============================================
+    # ADD NEW ZONE
+    # ============================================
+
+    if selectedIndex >= len(ZONES):
+
+        newZone = {
+            "name": newZoneName,
+            "points": newPoints,
+            "occupied": False
+        }
+
+        ZONES.append(newZone)
+
+        add_log("New zone added")
+
+    # ============================================
+    # UPDATE EXISTING ZONE
+    # ============================================
+
+    else:
+
+        ZONES[selectedIndex]["name"] = newZoneName
+
+        ZONES[selectedIndex]["points"] = newPoints
+
+        add_log("Zone updated")
+
+    # ============================================
+    # Refresh combobox
+    # ============================================
+
+    zoneNames = []
+
+    for zone in ZONES:
+        zoneNames.append(zone["name"])
+
+    zoneNames.append(ADD_NEW_ZONE_OPTION)
+
+    zoneSelector["values"] = zoneNames
+
+    # Select latest zone
+    zoneSelector.current(len(ZONES) - 1)
 
 
 # =========================================================
@@ -461,7 +528,7 @@ def save_layout():
     with open(filePath, "w") as file:
         json.dump(layoutData, file, indent=4)
 
-    print("Layout saved")
+    add_log("Layout saved")
 
 
 # =========================================================
@@ -484,7 +551,228 @@ def load_layout():
     for zone in layoutData["zones"]:
         ZONES.append(zone)
 
-    print("Layout loaded")
+    zoneNames = []
+
+    for zone in ZONES:
+        zoneNames.append(zone["name"])
+
+    zoneNames.append(ADD_NEW_ZONE_OPTION)
+
+    zoneSelector["values"] = zoneNames
+
+    zoneSelector.current(0)
+
+    load_zone_into_editor()
+
+    add_log("Layout loaded")
+
+
+# =========================================================
+# CREATE TKINTER GUI
+# =========================================================
+
+def create_tkinter_gui():
+
+    root = tk.Tk()
+
+    root.title("Railway Control Panel")
+    root.geometry("700x500")
+
+    root.lift()
+    root.attributes("-topmost", True)
+    root.after(100, lambda: root.attributes("-topmost", False))
+
+    # =====================================================
+    # LEFT PANEL
+    # =====================================================
+
+    leftFrame = tk.Frame(root)
+    leftFrame.pack(
+        side=tk.LEFT,
+        fill=tk.Y,
+        padx=20,
+        pady=20
+    )
+
+    # =====================================================
+    # RIGHT PANEL
+    # =====================================================
+
+    rightFrame = tk.Frame(root)
+    rightFrame.pack(
+        side=tk.LEFT,
+        fill=tk.BOTH,
+        expand=True,
+        padx=20,
+        pady=20
+    )
+
+    # =====================================================
+    # LEFT SIDE BUTTONS
+    # =====================================================
+
+    captureButton = tk.Button(
+        leftFrame,
+        text="Capture Background",
+        command=capture_background,
+        height=2,
+        width=25
+    )
+    captureButton.pack(pady=10)
+
+    global armButton
+
+    armButton = tk.Button(
+        leftFrame,
+        text="Arm Detection",
+        command=arm_detection,
+        height=2,
+        width=25,
+        state=tk.DISABLED
+    )
+    armButton.pack(pady=10)
+
+    global stopButton
+
+    stopButton = tk.Button(
+        leftFrame,
+        text="Stop Preview",
+        command=stop_preview,
+        height=2,
+        width=25,
+        state=tk.DISABLED
+    )
+    stopButton.pack(pady=10)
+
+    loadButton = tk.Button(
+        leftFrame,
+        text="Load Layout",
+        command=load_layout,
+        height=2,
+        width=25
+    )
+    loadButton.pack(pady=10)
+
+    saveButton = tk.Button(
+        leftFrame,
+        text="Save Layout",
+        command=save_layout,
+        height=2,
+        width=25
+    )
+    saveButton.pack(pady=10)
+
+    quitButton = tk.Button(
+        leftFrame,
+        text="Quit",
+        command=quit_program,
+        height=2,
+        width=25
+    )
+    quitButton.pack(pady=10)
+
+    # =====================================================
+    # RIGHT SIDE ZONE EDITOR
+    # =====================================================
+
+    tk.Label(
+        rightFrame,
+        text="Select Zone"
+    ).pack()
+
+    zoneNames = [ADD_NEW_ZONE_OPTION]
+
+    global zoneSelector
+
+    zoneSelector = ttk.Combobox(
+        rightFrame,
+        values=zoneNames,
+        state="readonly",
+        width=25
+    )
+
+    zoneSelector.pack(pady=5)
+
+    tk.Label(
+        rightFrame,
+        text="Zone Name"
+    ).pack()
+
+    global zoneNameEntry
+
+    zoneNameEntry = tk.Entry(
+        rightFrame,
+        width=25
+    )
+
+    zoneNameEntry.pack(pady=5)
+
+    zoneSelector.current(0)
+
+    zoneSelector.bind(
+        "<<ComboboxSelected>>",
+        load_zone_into_editor
+    )
+
+    global pointEntries
+
+    pointEntries = []
+
+    for i in range(4):
+
+        label = tk.Label(
+            rightFrame,
+            text=f"Point {i+1} (x,y)"
+        )
+
+        label.pack()
+
+        entry = tk.Entry(
+            rightFrame,
+            width=20
+        )
+
+        entry.bind(
+            "<Button-1>",
+            lambda event, index=i: select_point_entry(index)
+        )
+
+        entry.pack(pady=2)
+
+        pointEntries.append(entry)
+
+    applyButton = tk.Button(
+        rightFrame,
+        text="Apply Zone Changes",
+        command=apply_zone_changes,
+        height=2,
+        width=25
+    )
+    applyButton.pack(pady=20)
+
+    # =====================================================
+    # LOG AREA
+    # =====================================================
+
+    tk.Label(
+        root,
+        text="System Log"
+    ).pack()
+
+    global logText
+
+    logText = tk.Text(
+        root,
+        height=10,
+        width=80
+    )
+
+    logText.pack(
+        padx=10,
+        pady=10
+    )
+
+    return root
 
 
 # =========================================================
@@ -494,6 +782,12 @@ def load_layout():
 picam2 = initialize_camera()
 
 running = True
+zoneSelector = None
+pointEntries = []
+zoneNameEntry = None
+logText = None
+armButton = None
+stopButton = None
 root = create_tkinter_gui()
 
 while running:
@@ -515,15 +809,18 @@ while running:
         
         process_all_zones()
 
-    # Limit CPU stress 
-    sleep(0.01)
-
     draw_gui(frame)
 
-    root.update_idletasks()
-    root.update()
+    try:
+        root.update_idletasks()
+        root.update()
+    except tk.TclError:
+        running = False
 
     cv2.waitKey(1)
+
+    # Limit CPU stress 
+    sleep(0.01)
 
 # =========================================================
 # CLEANUP
