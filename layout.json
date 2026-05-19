@@ -87,6 +87,94 @@
                 ]
             ],
             "occupied": false
+        },
+        {
+            "name": "Intersection_B",
+            "points": [
+                [
+                    50,
+                    92
+                ],
+                [
+                    189,
+                    107
+                ],
+                [
+                    130,
+                    144
+                ],
+                [
+                    43,
+                    151
+                ]
+            ],
+            "occupied": false
+        },
+        {
+            "name": "Crossing_C",
+            "points": [
+                [
+                    491,
+                    44
+                ],
+                [
+                    591,
+                    48
+                ],
+                [
+                    596,
+                    109
+                ],
+                [
+                    456,
+                    114
+                ]
+            ],
+            "occupied": false
+        },
+        {
+            "name": "Intersection_C",
+            "points": [
+                [
+                    125,
+                    258
+                ],
+                [
+                    210,
+                    250
+                ],
+                [
+                    224,
+                    332
+                ],
+                [
+                    108,
+                    330
+                ]
+            ],
+            "occupied": false
+        },
+        {
+            "name": "Turnout_2",
+            "points": [
+                [
+                    558,
+                    422
+                ],
+                [
+                    676,
+                    393
+                ],
+                [
+                    712,
+                    434
+                ],
+                [
+                    560,
+                    444
+                ]
+            ],
+            "occupied": false
         }
     ]
 }

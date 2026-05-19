@@ -1,4 +1,4 @@
-# Added GUI
+# Added GUI and buttons. Added the ability to save and load zones' coordinates
 from picamera2 import Picamera2
 import cv2
 import numpy as np
@@ -12,11 +12,34 @@ from tkinter import filedialog
 # Variables Configuration
 # =========================================================
 
-ADD_NEW_ZONE_OPTION = "ADD NEW ZONE"
-
 # Camera resolution
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
+
+# Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
+# Larger value = less sensitive
+OCCUPANCY_THRESHOLD = 2000
+
+# Difference threshold in pixel level. How different must ONE pixel become before it counts as changed
+# Larger value = less sensitive to image changes
+DIFF_THRESHOLD = 25
+
+# Enable/disable image cleanup
+USE_CLEANUP = True
+
+# Morphology kernel size. Defines aggressiveness of cleanup
+# Lower values remove tiny noise but keeps more detail. Higher values remove much more noise but damage image. 5 is
+# moderate cleanup strength
+KERNEL_SIZE = 5
+
+# Pre-created morphology kernel matrix
+MORPH_KERNEL = np.ones(
+    (KERNEL_SIZE, KERNEL_SIZE),
+    np.uint8
+)
+
+
+ADD_NEW_ZONE_OPTION = "ADD NEW ZONE"
 
 # Detection zones. Provide coordinates for each of the 4 points
 ZONES = []
@@ -41,30 +64,70 @@ ui_state = {
 
     # Initialization of the windows
     "railway_window_initialized": False,
-    "mask_window_initialized": False
+    "mask_window_initialized": False,
+
+    "zone_selector": None,
+    "zone_name_entry": None,
+    "point_entries": [],
+
+    "log_text": None,
+    
+    "arm_button": None,
+    "stop_button": None,
+    "delete_button": None,
 }
 
 app_state = {
     "background_frame": None,
     "mask": None,
-    "gray_frame": None
+    "gray_frame": None,
+    "running": True
 }
 
-# Occupancy threshold in zone level. How MANY changed pixels are required before we declare occupancy
-# Larger value = less sensitive
-OCCUPANCY_THRESHOLD = 2000
+colors = {
+    "green": (0, 255, 0),
+    "red": (0, 0, 255),
+    "yellow": (255, 255, 0)
+}
 
-# Difference threshold in pixel level. How different must ONE pixel become before it counts as changed
-# Larger value = less sensitive to image changes
-DIFF_THRESHOLD = 25
+class ToolTip:
 
-# Enable/disable image cleanup
-USE_CLEANUP = True
+    def __init__(self, widget, text):
 
-# Morphology kernel size. Defines aggressiveness of cleanup
-# Lower values remove tiny noise but keeps more detail. Higher values remove much more noise but damage image. 5 is
-# moderate cleanup strength
-KERNEL_SIZE = 5
+        self.widget = widget
+        self.text = text
+
+        widget.bind("<Enter>", self.show_tooltip)
+        widget.bind("<Leave>", self.hide_tooltip)
+
+        self.tooltip = None
+
+    def show_tooltip(self, event):
+
+        x = event.x_root + 10
+        y = event.y_root + 10
+
+        self.tooltip = tk.Toplevel(self.widget)
+
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            self.tooltip,
+            text=self.text,
+            background="lightyellow",
+            relief="solid",
+            borderwidth=1
+        )
+
+        label.pack()
+
+    def hide_tooltip(self, event):
+
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
 
 # =========================================================
 # Camera Initialazation
@@ -110,7 +173,6 @@ def create_difference_mask():
         255,
         cv2.THRESH_BINARY
     )
-
     return thresh
 
 
@@ -119,10 +181,7 @@ def create_difference_mask():
 # =========================================================
 
 def select_point_entry(index):
-
     ui_state["active_point_index"] = index
-
-    print(f"Selected Point {index + 1}")
 
 
 # =========================================================
@@ -130,17 +189,9 @@ def select_point_entry(index):
 # =========================================================
 
 def cleanup_mask():
-    # Create kernel matrix
-    kernel = np.ones((KERNEL_SIZE, KERNEL_SIZE), np.uint8)
-
     # Morphological opening:
     # removes small white noise
-    cleanMask = cv2.morphologyEx(
-        app_state["mask"],
-        cv2.MORPH_OPEN,
-        kernel
-    )
-
+    cleanMask = cv2.morphologyEx(app_state["mask"],cv2.MORPH_OPEN,MORPH_KERNEL)
     return cleanMask
 
 
@@ -156,17 +207,10 @@ def extract_zone(points):
     points = np.int32(points)
 
     # Draw filled polygon
-    cv2.fillPoly(
-        polygonMask,
-        [points],
-        255
-    )
+    cv2.fillPoly(polygonMask,[points],255)
 
     # Keep only pixels inside polygon
-    result = cv2.bitwise_and(
-        app_state["mask"],
-        polygonMask
-    )
+    result = cv2.bitwise_and(app_state["mask"],polygonMask)
 
     return result
 
@@ -226,18 +270,12 @@ def draw_zone_overlays(frame, points, zoneName, occupied, status):
 
     # Choose color
     if occupied:
-        color = (0, 0, 255)
+        color = colors["red"]
     else:
-        color = (0, 255, 0)
+        color = colors["green"]
 
     # Draw polygon outline
-    cv2.polylines(
-        frame,
-        [points],
-        True,
-        color,
-        2
-    )
+    cv2.polylines(frame,[points],True,color,2)
 
     # Use first point for text anchor
     textX = points[0][0]
@@ -246,33 +284,7 @@ def draw_zone_overlays(frame, points, zoneName, occupied, status):
     # Draw zone name and status
     overlayText = f"{zoneName} {status}"
 
-    cv2.putText(
-        frame,
-        overlayText,
-        (textX, textY - 10),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        color,
-        2
-    )
-
-
-# =========================================================
-# Draw mouse coordinates on screen
-# =========================================================
-
-def draw_mouse_coordinates(frame):
-    mouseText = (f"Mouse: {ui_state['mouseX']}, {ui_state['mouseY']}")
-
-    cv2.putText(
-        frame,
-        mouseText,
-        (10, 60),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 0),
-        2
-    )
+    cv2.putText(frame,overlayText,(textX, textY - 10),cv2.FONT_HERSHEY_SIMPLEX,0.7,color,2)
 
 
 # =========================================================
@@ -284,25 +296,22 @@ def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         ui_state["mouseX"] = x
         ui_state["mouseY"] = y
-        print(f"Mouse click: x={x}, y={y}")
+        add_log(f"Mouse click: x={x}, y={y}")
 
         activeIndex = ui_state["active_point_index"]
 
         if activeIndex is not None:
 
-            pointEntries[activeIndex].delete(0, tk.END)
+            ui_state["point_entries"][activeIndex].delete(0, tk.END)
 
-            pointEntries[activeIndex].insert(
-                0,
-                f"{x},{y}"
-            )
+            ui_state["point_entries"][activeIndex].insert(0,f"{x},{y}")
 
 
 # =========================================================
 # DRAW GUI
 # =========================================================
 
-def draw_gui(frame):    
+def update_preview_windows(frame):    
     # Draw GUI only if debug windows are enabled
     if not ui_state["windows_enabled"]:
         return
@@ -322,9 +331,6 @@ def draw_gui(frame):
             status
         )
 
-    # Draw help text
-    draw_mouse_coordinates(frame)
-
     # Main camera window
     cv2.imshow("Railway Vision", frame)
     if not ui_state["railway_window_initialized"]:
@@ -339,9 +345,6 @@ def draw_gui(frame):
         if not ui_state["mask_window_initialized"]:
             cv2.moveWindow("Threshold Mask",1400,50)
             ui_state["mask_window_initialized"] = True
-    
-    # # Mouse callback
-    # cv2.setMouseCallback("Railway Vision", mouse_callback)
 
 
 # =========================================================
@@ -350,13 +353,13 @@ def draw_gui(frame):
 
 def add_log(message):
 
-    logText.insert(
+    ui_state["log_text"].insert(
         tk.END,
         message + "\n"
     )
 
     # Auto-scroll to latest message
-    logText.see(tk.END)
+    ui_state["log_text"].see(tk.END)
 
 
 # =========================================================
@@ -364,24 +367,14 @@ def add_log(message):
 # =========================================================
 
 def capture_background():
-
     app_state["background_frame"] = app_state["gray_frame"].copy()
-
-    armButton.config(
-        state=tk.NORMAL
-    )
-
+    ui_state["arm_button"].config(state=tk.NORMAL)
     add_log("Background reference captured")
 
 
 def arm_detection():
-
     ui_state["detection_enabled"] = True
-
-    stopButton.config(
-        state=tk.NORMAL
-    )
-
+    ui_state["stop_button"].config(state=tk.NORMAL)
     add_log("Occupancy detection armed")
 
 
@@ -392,8 +385,7 @@ def stop_preview():
 
 
 def quit_program():
-    global running
-    running = False
+    app_state["running"] = False
     add_log("Exiting")
 
 
@@ -403,15 +395,20 @@ def quit_program():
 
 def load_zone_into_editor(event=None):
 
-    selectedIndex = zoneSelector.current()
+    selectedIndex = ui_state["zone_selector"].current()
 
     # ADD NEW ZONE selected
     if selectedIndex >= len(ZONES):
+
         ui_state["selected_zone_index"] = -1
 
-        zoneNameEntry.delete(0, tk.END)
+        ui_state["delete_button"].config(
+            state=tk.DISABLED
+        )
 
-        for entry in pointEntries:
+        ui_state["zone_name_entry"].delete(0, tk.END)
+
+        for entry in ui_state["point_entries"]:
             entry.delete(0, tk.END)
 
         return
@@ -420,80 +417,47 @@ def load_zone_into_editor(event=None):
 
     zoneData = ZONES[selectedIndex]
 
-    zoneNameEntry.delete(0, tk.END)
-
-    zoneNameEntry.insert(
-        0,
-        zoneData["name"]
+    ui_state["delete_button"].config(
+        state=tk.NORMAL
     )
 
-    for i in range(4):
+    ui_state["zone_name_entry"].delete(0, tk.END)
 
+    ui_state["zone_name_entry"].insert(0,zoneData["name"])
+
+    for i in range(4):
         x = zoneData["points"][i][0]
         y = zoneData["points"][i][1]
-
-        pointEntries[i].delete(0, tk.END)
-
-        pointEntries[i].insert(
-            0,
-            f"{x},{y}"
-        )
+        ui_state["point_entries"][i].delete(0, tk.END)
+        ui_state["point_entries"][i].insert(0,f"{x},{y}")
 
 
 # =========================================================
-# APPLY ZONE COORDINATES CHANGES
+# DELETE SELECTED ZONE
 # =========================================================
 
-def apply_zone_changes():
+def delete_selected_zone():
+    selectedIndex = ui_state["zone_selector"].current()
 
-    selectedIndex = zoneSelector.current()
-
-    newZoneName = zoneNameEntry.get()
-
-    newPoints = []
-
-    for i in range(4):
-
-        textValue = pointEntries[i].get()
-
-        splitValues = textValue.split(",")
-
-        x = int(splitValues[0])
-        y = int(splitValues[1])
-
-        newPoints.append([x, y])
-
-    # ============================================
-    # ADD NEW ZONE
-    # ============================================
-
+    # Prevent deleting ADD NEW ZONE option
     if selectedIndex >= len(ZONES):
+        return
 
-        newZone = {
-            "name": newZoneName,
-            "points": newPoints,
-            "occupied": False
-        }
+    deletedName = ZONES[selectedIndex]["name"]
 
-        ZONES.append(newZone)
+    del ZONES[selectedIndex]
 
-        add_log("New zone added")
+    # Rebuild combobox
+    refresh_zone_selector()
 
-    # ============================================
-    # UPDATE EXISTING ZONE
-    # ============================================
+    add_log(f"Deleted zone: {deletedName}")
 
-    else:
 
-        ZONES[selectedIndex]["name"] = newZoneName
+# =========================================================
+# REFRESH ZONE SELECTOR
+# =========================================================
 
-        ZONES[selectedIndex]["points"] = newPoints
-
-        add_log("Zone updated")
-
-    # ============================================
-    # Refresh combobox
-    # ============================================
+def refresh_zone_selector(selectIndex=0):
 
     zoneNames = []
 
@@ -502,10 +466,55 @@ def apply_zone_changes():
 
     zoneNames.append(ADD_NEW_ZONE_OPTION)
 
-    zoneSelector["values"] = zoneNames
+    ui_state["zone_selector"]["values"] = zoneNames
 
-    # Select latest zone
-    zoneSelector.current(len(ZONES) - 1)
+    ui_state["zone_selector"].current(selectIndex)
+
+    load_zone_into_editor()
+
+
+# =========================================================
+# APPLY ZONE COORDINATES CHANGES
+# =========================================================
+
+def apply_zone_changes():
+    selectedIndex = ui_state["zone_selector"].current()
+    newZoneName = ui_state["zone_name_entry"].get()
+    newPoints = []
+
+    for i in range(4):
+        textValue = ui_state["point_entries"][i].get()
+        splitValues = textValue.split(",")
+        try:
+            x = int(splitValues[0])
+            y = int(splitValues[1])
+            newPoints.append([x, y])
+        except:
+            add_log("Invalid coordinate format")
+
+    # ============================================
+    # ADD NEW ZONE
+    # ============================================
+
+    if selectedIndex >= len(ZONES):
+        newZone = {
+            "name": newZoneName,
+            "points": newPoints,
+            "occupied": False
+        }
+        ZONES.append(newZone)
+        add_log("New zone added")
+
+    # ============================================
+    # UPDATE EXISTING ZONE
+    # ============================================
+
+    else:
+        ZONES[selectedIndex]["name"] = newZoneName
+        ZONES[selectedIndex]["points"] = newPoints
+        add_log("Zone updated")
+
+    refresh_zone_selector(len(ZONES) - 1)
 
 
 # =========================================================
@@ -551,19 +560,7 @@ def load_layout():
     for zone in layoutData["zones"]:
         ZONES.append(zone)
 
-    zoneNames = []
-
-    for zone in ZONES:
-        zoneNames.append(zone["name"])
-
-    zoneNames.append(ADD_NEW_ZONE_OPTION)
-
-    zoneSelector["values"] = zoneNames
-
-    zoneSelector.current(0)
-
-    load_zone_into_editor()
-
+    refresh_zone_selector()
     add_log("Layout loaded")
 
 
@@ -572,7 +569,6 @@ def load_layout():
 # =========================================================
 
 def create_tkinter_gui():
-
     root = tk.Tk()
 
     root.title("Railway Control Panel")
@@ -619,10 +615,12 @@ def create_tkinter_gui():
         width=25
     )
     captureButton.pack(pady=10)
+    ToolTip(
+        captureButton,
+        "Capture empty railway image as background reference"
+    )
 
-    global armButton
-
-    armButton = tk.Button(
+    ui_state["arm_button"] = tk.Button(
         leftFrame,
         text="Arm Detection",
         command=arm_detection,
@@ -630,11 +628,13 @@ def create_tkinter_gui():
         width=25,
         state=tk.DISABLED
     )
-    armButton.pack(pady=10)
+    ui_state["arm_button"].pack(pady=10)
+    ToolTip(
+        ui_state["arm_button"],
+        "Enable train occupancy detection"
+    )
 
-    global stopButton
-
-    stopButton = tk.Button(
+    ui_state["stop_button"] = tk.Button(
         leftFrame,
         text="Stop Preview",
         command=stop_preview,
@@ -642,7 +642,11 @@ def create_tkinter_gui():
         width=25,
         state=tk.DISABLED
     )
-    stopButton.pack(pady=10)
+    ui_state["stop_button"].pack(pady=10)
+    ToolTip(
+        ui_state["stop_button"],
+        "Close OpenCV preview windows"
+    )
 
     loadButton = tk.Button(
         leftFrame,
@@ -652,6 +656,10 @@ def create_tkinter_gui():
         width=25
     )
     loadButton.pack(pady=10)
+    ToolTip(
+        loadButton,
+        "Load layout from a JSON file"
+    )
 
     saveButton = tk.Button(
         leftFrame,
@@ -661,6 +669,11 @@ def create_tkinter_gui():
         width=25
     )
     saveButton.pack(pady=10)
+    ToolTip(
+        saveButton,
+        "Save layout to JSON file"
+    )
+
 
     quitButton = tk.Button(
         leftFrame,
@@ -670,6 +683,10 @@ def create_tkinter_gui():
         width=25
     )
     quitButton.pack(pady=10)
+    ToolTip(
+        quitButton,
+        "Quit program"
+    )
 
     # =====================================================
     # RIGHT SIDE ZONE EDITOR
@@ -682,44 +699,57 @@ def create_tkinter_gui():
 
     zoneNames = [ADD_NEW_ZONE_OPTION]
 
-    global zoneSelector
-
-    zoneSelector = ttk.Combobox(
+    ui_state["zone_selector"] = ttk.Combobox(
         rightFrame,
         values=zoneNames,
         state="readonly",
         width=25
     )
 
-    zoneSelector.pack(pady=5)
+    ui_state["zone_selector"].pack(pady=5)
 
     tk.Label(
         rightFrame,
         text="Zone Name"
     ).pack()
 
-    global zoneNameEntry
+    zoneNameFrame = tk.Frame(rightFrame)
 
-    zoneNameEntry = tk.Entry(
-        rightFrame,
-        width=25
+    zoneNameFrame.pack(pady=5)
+
+    ui_state["zone_name_entry"] = tk.Entry(
+        zoneNameFrame,
+        width=18
     )
 
-    zoneNameEntry.pack(pady=5)
+    ui_state["zone_name_entry"].pack(
+        side=tk.LEFT,
+        padx=5
+    )
 
-    zoneSelector.current(0)
+    ui_state["delete_button"] = tk.Button(
+        zoneNameFrame,
+        text="X",
+        width=3,
+        fg="red",
+        command=delete_selected_zone,
+        state=tk.DISABLED
+    )
+    ui_state["delete_button"].pack(side=tk.LEFT)
+    ToolTip(
+        ui_state["delete_button"],
+        "Delete selected zone"
+    )
 
-    zoneSelector.bind(
+    ui_state["zone_selector"].current(0)
+
+    ui_state["zone_selector"].bind(
         "<<ComboboxSelected>>",
         load_zone_into_editor
     )
 
-    global pointEntries
-
-    pointEntries = []
-
+    ui_state["point_entries"].clear()
     for i in range(4):
-
         label = tk.Label(
             rightFrame,
             text=f"Point {i+1} (x,y)"
@@ -739,7 +769,7 @@ def create_tkinter_gui():
 
         entry.pack(pady=2)
 
-        pointEntries.append(entry)
+        ui_state["point_entries"].append(entry)
 
     applyButton = tk.Button(
         rightFrame,
@@ -749,6 +779,10 @@ def create_tkinter_gui():
         width=25
     )
     applyButton.pack(pady=20)
+    ToolTip(
+        applyButton,
+        "Apply changes to layout"
+    )
 
     # =====================================================
     # LOG AREA
@@ -759,15 +793,13 @@ def create_tkinter_gui():
         text="System Log"
     ).pack()
 
-    global logText
-
-    logText = tk.Text(
+    ui_state["log_text"] = tk.Text(
         root,
         height=10,
         width=80
     )
 
-    logText.pack(
+    ui_state["log_text"].pack(
         padx=10,
         pady=10
     )
@@ -781,16 +813,9 @@ def create_tkinter_gui():
 
 picam2 = initialize_camera()
 
-running = True
-zoneSelector = None
-pointEntries = []
-zoneNameEntry = None
-logText = None
-armButton = None
-stopButton = None
 root = create_tkinter_gui()
 
-while running:
+while app_state["running"]:
     # CAPTURE FRAME
     frame = picam2.capture_array()
 
@@ -809,13 +834,13 @@ while running:
         
         process_all_zones()
 
-    draw_gui(frame)
+    update_preview_windows(frame)
 
     try:
         root.update_idletasks()
         root.update()
     except tk.TclError:
-        running = False
+        app_state["running"] = False
 
     cv2.waitKey(1)
 

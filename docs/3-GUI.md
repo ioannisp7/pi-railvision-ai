@@ -1,0 +1,1 @@
+1. Added GUI and buttons. Added the ability to save and load zones' coordinates
