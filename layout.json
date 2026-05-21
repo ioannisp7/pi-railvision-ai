@@ -1,7 +1,7 @@
 {
     "zones": [
         {
-            "name": "CROSSING_A",
+            "name": "Zone_A",
             "points": [
                 [
                     500,
@@ -19,11 +19,10 @@
                     500,
                     340
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "CROSSING_B",
+            "name": "Zone_B",
             "points": [
                 [
                     800,
@@ -41,11 +40,10 @@
                     800,
                     340
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Turnout_A",
+            "name": "Zone_C",
             "points": [
                 [
                     200,
@@ -63,11 +61,10 @@
                     180,
                     610
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Intersection_A",
+            "name": "Zone_D",
             "points": [
                 [
                     983,
@@ -85,11 +82,10 @@
                     854,
                     553
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Intersection_B",
+            "name": "Zone_E",
             "points": [
                 [
                     50,
@@ -107,11 +103,10 @@
                     43,
                     151
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Crossing_C",
+            "name": "Zone_F",
             "points": [
                 [
                     491,
@@ -129,11 +124,10 @@
                     456,
                     114
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Intersection_C",
+            "name": "Zone_G",
             "points": [
                 [
                     125,
@@ -151,11 +145,10 @@
                     108,
                     330
                 ]
-            ],
-            "occupied": false
+            ]
         },
         {
-            "name": "Turnout_2",
+            "name": "Zone_H",
             "points": [
                 [
                     558,
@@ -173,8 +166,7 @@
                     560,
                     444
                 ]
-            ],
-            "occupied": false
+            ]
         }
     ]
 }
