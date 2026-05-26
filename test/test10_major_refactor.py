@@ -72,8 +72,9 @@ class Messages:
 
     PREVIEW_DESTROYED = "Preview stopped"
 
-    ZONE_UPDATED = "Zone updated"
-    ZONE_ADDED = "New zone added"
+    ZONE_ADDED_SUFFIX = "zone created"
+    ZONE_UPDATED_SUFFIX = "zone updated"
+    ZONE_DELETED_SUFFIX = "zone deleted"
 
     BACKGROUND_CAPTURED = "Background reference captured"
 
@@ -100,6 +101,18 @@ class EventType:
     ENTERED = "ENTERED"
     EXITED = "EXITED"
 
+
+class EventFormatter:
+
+    @staticmethod
+    def format(event_type: str, zone_name: str) -> str:
+
+        if event_type == EventType.ENTERED:
+            return f"Object ENTERED {zone_name}"
+
+        return f"Object EXITED {zone_name}"
+
+
 ADD_NEW_ZONE_OPTION = "ADD NEW ZONE"
 
 @dataclass
@@ -107,6 +120,13 @@ class OccupancyResult:
     occupied: bool
     occupancy_pixels: int
     occupancy_ratio: float
+
+
+@dataclass
+class ZoneRuntimeState:
+    occupied: bool = False
+    occupancy_pixels: int = 0
+    occupancy_ratio: float = 0
 
 
 class OccupancyAnalyzer:
@@ -147,14 +167,16 @@ class FrameContext:
     motion_mask: np.ndarray | None
 
 
+@dataclass(frozen=True)
+class DetectionResult:
+    frame_context: FrameContext
+    events: list[tuple[str, str]]
+
+
 class OccupancyDetector:
     def __init__(self):
 
         self.background_frame: np.ndarray | None = None
-
-        self.gray_frame: np.ndarray | None = None
-
-        self.mask: np.ndarray | None = None
 
     def create_difference_mask(self, gray_frame: np.ndarray) -> np.ndarray:
         diff = cv2.absdiff(
@@ -202,9 +224,6 @@ class OccupancyDetector:
             motion_mask = self.remove_noise(
                 motion_mask
             )
-        
-        self.gray_frame = gray_frame
-        self.mask = motion_mask
 
         return FrameContext(
             raw_frame=frame,
@@ -263,10 +282,12 @@ class LayoutPersistence:
 class ZoneRepository:
     def __init__(self):
         self.zones: list["Zone"] = []
+        self.runtime_states: dict[str, ZoneRuntimeState] = {}
 
     def add_zone(self, name: str, points: list[list[int]]) -> None:
         zone = Zone(name, points)
         self.zones.append(zone)
+        self.runtime_states[name] = ZoneRuntimeState()
 
     def update_zone(self, index: int, name: str, points: list[list[int]]) -> None:
         zone = self.zones[index]
@@ -274,10 +295,16 @@ class ZoneRepository:
         zone.update_points(points)
     
     def delete_zone(self, index: int) -> None:
+        zone = self.zones[index]
+        if zone.name in self.runtime_states:
+            del self.runtime_states[zone.name]
         del self.zones[index]
 
     def set_zones(self, zones: list["Zone"]) -> None:
         self.zones = zones
+        self.runtime_states.clear()
+        for zone in zones:
+            self.runtime_states[zone.name] = ZoneRuntimeState()
 
 
 class ZoneProcessor:
@@ -298,11 +325,11 @@ class ZoneProcessor:
 
     def process_zone(
         self,
-        detector: OccupancyDetector,
+        frame_context: FrameContext,
         zone: "Zone") -> tuple[str, str] | None:
 
         zone_mask = self.extract_zone(
-            detector.mask,
+            frame_context.motion_mask,
             zone
         )
 
@@ -311,9 +338,13 @@ class ZoneProcessor:
             zone.geometry.total_pixels
         )
 
-        previous_occupied = zone.occupied
+        state = self.repository.runtime_states[zone.name]
 
-        zone.apply_analysis(result)
+        previous_occupied = state.occupied
+
+        state.occupied = result.occupied
+        state.occupancy_pixels = result.occupancy_pixels
+        state.occupancy_ratio = result.occupancy_ratio
 
         if not previous_occupied and result.occupied:
             return (EventType.ENTERED, zone.name)
@@ -322,14 +353,14 @@ class ZoneProcessor:
             return (EventType.EXITED, zone.name)
 
         return None
- 
+        
     # PROCESS ALL ZONES - DETECTION LOGIC
     def process_all_zones(
         self,
-        detector: OccupancyDetector,
+        frame_context: FrameContext,
         detection_enabled: bool) -> list[tuple[str, str]]:
 
-        if detector.mask is None:
+        if frame_context.motion_mask is None:
             return []
 
         events = []
@@ -337,11 +368,14 @@ class ZoneProcessor:
         for zone in self.repository.zones:
 
             if not detection_enabled:
-                zone.update_occupancy(False, 0, 0)
+                state = self.repository.runtime_states[zone.name]
+                state.occupied = False
+                state.occupancy_pixels = 0
+                state.occupancy_ratio = 0
                 continue
 
             event = self.process_zone(
-                detector,
+                frame_context,
                 zone
             )
 
@@ -351,122 +385,25 @@ class ZoneProcessor:
         return events
 
 
-class ZoneManager:
+class TkImageConverter:
 
-    def __init__(
-        self,
-        repository: ZoneRepository,
-        processor: ZoneProcessor):
-
-        self.repository = repository
-        self.processor = processor
-
-    @property
-    def zones(self):
-        return self.repository.zones
-
-    def add_zone(
-        self,
-        name: str,
-        points: list[list[int]]):
-
-        self.repository.add_zone(
-            name,
-            points
-        )
-
-    def update_zone(
-        self,
-        index: int,
-        name: str,
-        points: list[list[int]]):
-
-        self.repository.update_zone(
-            index,
-            name,
-            points
-        )
-
-    def delete_zone(
-        self,
-        index: int):
-
-        self.repository.delete_zone(index)
-
-    def set_zones(
-        self,
-        zones: list["Zone"]):
-
-        self.repository.set_zones(zones)
-
-    def process_all_zones(
-        self,
-        detector: OccupancyDetector,
-        detection_enabled: bool):
-
-        return self.processor.process_all_zones(
-            detector,
-            detection_enabled
-        )
-
-
-class TkImagePresenter:
-    def update_camera_preview(
-        self,
-        camera_label: tk.Label,
-        overlay_frame: np.ndarray):
-
-        overlay_frame = cv2.resize(
-            overlay_frame,
-            (
-                AppConfig.DISPLAY_WIDTH,
-                AppConfig.DISPLAY_HEIGHT
-            )
-        )
+    @staticmethod
+    def to_photo_image(
+        frame: np.ndarray
+    ) -> ImageTk.PhotoImage:
 
         rgb_frame = cv2.cvtColor(
-            overlay_frame,
+            frame,
             cv2.COLOR_BGR2RGB
         )
 
-        image = Image.fromarray(rgb_frame)
-
-        photo = ImageTk.PhotoImage(image=image)
-
-        camera_label.config(image=photo)
-
-        camera_label.image = photo
-
-
-    def update_mask_preview(
-        self,
-        mask_label: tk.Label,
-        mask: np.ndarray,
-        detection_enabled: bool):
-
-        if mask is None or not detection_enabled:
-            return
-
-        mask_frame = cv2.resize(
-            mask,
-            (
-                AppConfig.DISPLAY_WIDTH,
-                AppConfig.DISPLAY_HEIGHT
-            )
+        image = Image.fromarray(
+            rgb_frame
         )
 
-        rgb_mask = cv2.cvtColor(
-            mask_frame,
-            cv2.COLOR_BGR2RGB
+        return ImageTk.PhotoImage(
+            image=image
         )
-
-        mask_image = Image.fromarray(rgb_mask)
-
-        mask_photo = ImageTk.PhotoImage(image=mask_image)
-
-        mask_label.config(image=mask_photo)
-
-        mask_label.image = mask_photo
 
 
 class CameraOverlayRenderer:
@@ -490,9 +427,20 @@ class CameraOverlayRenderer:
             AppConfig.FONT_THICKNESS
         )
 
+    def draw_zone_overlay(
+        self,
+        frame: np.ndarray,
+        zone: "Zone",
+        occupied: bool
+    ) -> None:
 
-    def draw_zone_overlays(self,frame: np.ndarray, zone: "Zone", status: str) -> None:
-        color = zone.color
+        color = self.get_zone_color(
+            occupied
+        )
+
+        status = self.get_zone_status_text(
+            occupied
+        )
 
         cv2.polylines(
             frame,
@@ -503,16 +451,16 @@ class CameraOverlayRenderer:
         )
 
         first_point = zone.geometry.points_np[0]
-        text_x = first_point[0]
-        text_y = first_point[1]
 
-        overlay_text = f"{zone.name} {status}"
+        overlay_text = (
+            f"{zone.name} {status}"
+        )
 
         self.draw_text(
             frame,
             overlay_text,
-            text_x,
-            text_y - 10,
+            first_point[0],
+            first_point[1] - 10,
             color,
             AppConfig.FONT_SCALE
         )
@@ -523,13 +471,21 @@ class CameraOverlayRenderer:
         else:
             return "FREE"
 
+    def get_zone_color(self, occupied: bool) -> tuple[int, int, int]:
+
+        if occupied:
+            return AppConfig.COLOR_RED
+        else:
+            return AppConfig.COLOR_GREEN
+
 
 class MaskRenderer:
 
     def render(
         self,
         mask: np.ndarray,
-        zones: list["Zone"]) -> np.ndarray:
+        zones: list["Zone"],
+        runtime_states: dict[str, ZoneRuntimeState]) -> np.ndarray:
 
         mask_color = cv2.cvtColor(
             mask,
@@ -540,10 +496,12 @@ class MaskRenderer:
 
         for zone in zones:
 
-            color = zone.color
+            zone_runtime_state = runtime_states[zone.name]
+
+            color = self.get_zone_color(zone_runtime_state.occupied)
 
             occupancy_percent = (
-                zone.occupancy_ratio * 100
+                zone_runtime_state.occupancy_ratio * 100
             )
 
             cv2.polylines(
@@ -568,6 +526,15 @@ class MaskRenderer:
 
         return mask_color
 
+    def get_zone_color(
+        self,
+        occupied: bool
+    ) -> tuple[int, int, int]:
+
+        if occupied:
+            return AppConfig.COLOR_RED
+        else:
+            return AppConfig.COLOR_GREEN
 
 class CameraPanel:
     def __init__(self):
@@ -941,33 +908,19 @@ class ZoneEditorPanel:
         return values
     
     def clear_editor(self):
-        self.zone_name_entry.delete(0, tk.END)
-
-        for entry in self.point_entries:
-            entry.delete(0, tk.END)
-
-        self.delete_button.config(
-            state=tk.DISABLED
-        )
+        self.set_zone_name("")
+        for i in range(4):
+            self.clear_point(i)
+        self.disable_delete_button()
 
     def load_zone(self, zone):
-        self.delete_button.config(
-            state=tk.NORMAL
-        )
-
-        self.zone_name_entry.delete(0, tk.END)
-
-        self.zone_name_entry.insert(0, zone.name)
-
+        self.enable_delete_button()
+        self.set_zone_name(zone.name)
         for i in range(4):
-
             x = zone.points[i][0]
             y = zone.points[i][1]
-
-            self.point_entries[i].delete(0, tk.END)
-
-            self.point_entries[i].insert(
-                0,
+            self.set_point_text(
+                i,
                 f"{x},{y}"
             )
 
@@ -995,25 +948,44 @@ class ZoneEditorPanel:
         )
 
 
+class DetectionState:
+
+    def __init__(self):
+        self.detection_enabled = False
+
+
+class PreviewState:
+
+    def __init__(self):
+        self.preview_enabled = True
+        self.latest_frame = None
+
+
+class EditorState:
+
+    def __init__(self):
+        self.active_point_index = None
+
+
 class ZoneEditorController:
 
     def __init__(
         self,
-        zone_manager: ZoneManager,
+        zone_repository: ZoneRepository,
         editor_panel: ZoneEditorPanel,
         log_panel: LogPanel,
         camera_panel: CameraPanel,
-        state: "UIState"):
+        editor_state: EditorState):
 
-        self.zone_manager = zone_manager
+        self.zone_repository = zone_repository
         self.editor_panel = editor_panel
         self.log_panel = log_panel
         self.camera_panel = camera_panel
-        self.state = state
+        self.editor_state = editor_state
     
     # SELECTED TEXTBOX
     def select_point_entry(self, index: int) -> None:
-        self.state.active_point_index = index
+        self.editor_state.active_point_index = index
 
     # GET CAMERA CLICK
     def on_camera_click(self, event: tk.Event) -> None:
@@ -1025,14 +997,11 @@ class ZoneEditorController:
 
         self.log_panel.add_log(f"Mouse click: x={x}, y={y}")
 
-        active_index = self.state.active_point_index
+        active_index = self.editor_state.active_point_index
 
         if active_index is not None:
-
-            self.editor_panel.point_entries[active_index].delete(0, tk.END)
-
-            self.editor_panel.point_entries[active_index].insert(
-                0,
+            self.editor_panel.set_point_text(
+                active_index,
                 f"{x},{y}"
             )
 
@@ -1041,15 +1010,15 @@ class ZoneEditorController:
         selected_index = self.editor_panel.zone_selector.current()
 
         # ADD NEW ZONE selected
-        if selected_index >= len(self.zone_manager.zones):
+        if selected_index >= len(self.zone_repository.zones):
 
-            self.state.active_point_index = None
+            self.editor_state.active_point_index = None
 
             self.editor_panel.clear_editor()
 
             return
 
-        zone = self.zone_manager.zones[selected_index]
+        zone = self.zone_repository.zones[selected_index]
 
         if len(zone.points) != 4:
             self.log_panel.add_log(
@@ -1064,24 +1033,24 @@ class ZoneEditorController:
         selected_index = self.editor_panel.zone_selector.current()
 
         # Prevent deleting ADD NEW ZONE option
-        if selected_index >= len(self.zone_manager.zones):
+        if selected_index >= len(self.zone_repository.zones):
             return
 
-        deletedName = (self.zone_manager.zones[selected_index].name)
+        deleted_name = (self.zone_repository.zones[selected_index].name)
 
-        self.zone_manager.delete_zone(selected_index)
+        self.zone_repository.delete_zone(selected_index)
 
         # Rebuild combobox
         self.refresh_zone_selector()
 
-        self.log_panel.add_log(f"{Messages.ZONE_DELETED_PREFIX} {deletedName}")
+        self.log_panel.add_log(f"{deleted_name} {Messages.ZONE_DELETED_SUFFIX}")
 
     # REFRESH ZONE SELECTOR
     def refresh_zone_selector(self, selectIndex=0):
 
         zone_names = []
 
-        for zone in self.zone_manager.zones:
+        for zone in self.zone_repository.zones:
             zone_names.append(zone.name)
 
         zone_names.append(ADD_NEW_ZONE_OPTION)
@@ -1113,7 +1082,7 @@ class ZoneEditorController:
     # APPLY ZONE COORDINATES CHANGES
     def apply_zone_changes(self) -> None:
         selected_index = self.editor_panel.zone_selector.current()
-        new_zone_name = self.editor_panel.zone_name_entry.get()
+        new_zone_name = self.editor_panel.get_zone_name()
         new_points = self.get_points_from_editor()
 
         if new_points is None:
@@ -1132,50 +1101,32 @@ class ZoneEditorController:
         # ADD NEW ZONE
         # ============================================
 
-        if selected_index >= len(self.zone_manager.zones):
-            self.zone_manager.add_zone(
+        if selected_index >= len(self.zone_repository.zones):
+            self.zone_repository.add_zone(
                 new_zone_name,
                 new_points
             )
-            self.log_panel.add_log(Messages.ZONE_ADDED)
+            self.log_panel.add_log(f"{new_zone_name} {Messages.ZONE_ADDED_SUFFIX}")
 
         # ============================================
         # UPDATE EXISTING ZONE
         # ============================================
 
         else:
-            self.zone_manager.update_zone(
+            self.zone_repository.update_zone(
                 selected_index,
                 new_zone_name,
                 new_points
             )
-            self.log_panel.add_log(Messages.ZONE_UPDATED)
 
-        if selected_index >= len(self.zone_manager.zones) - 1:
+            self.log_panel.add_log(f"{new_zone_name} {Messages.ZONE_UPDATED_SUFFIX}")
+
+        if selected_index >= len(self.zone_repository.zones) - 1:
             self.refresh_zone_selector(
-                len(self.zone_manager.zones) - 1
+                len(self.zone_repository.zones) - 1
             )
         else:
             self.refresh_zone_selector(selected_index)
-
-    def log_zone_result(self, created: bool) -> None:
-        if created:
-            self.log_panel.add_log(
-                Messages.ZONE_ADDED
-            )
-        else:
-            self.log_panel.add_log(
-                Messages.ZONE_UPDATED
-            )
-
-
-class UIState:
-
-    def __init__(self):
-        self.preview_enabled = True
-        self.detection_enabled = False
-        self.active_point_index = None
-        self.latest_frame = None
 
 
 class DetectionController:
@@ -1185,17 +1136,19 @@ class DetectionController:
         engine: "RailwayDetectionEngine",
         control_panel: ControlPanel,
         log_panel: LogPanel,
-        state: UIState):
+        detection_state: DetectionState,
+        preview_state: PreviewState):
 
         self.engine = engine
         self.control_panel = control_panel
         self.log_panel = log_panel
-        self.state = state
+        self.detection_state = detection_state
+        self.preview_state = preview_state
 
 
     def capture_background(self):
 
-        success = self.engine.capture_background_reference(self.state.latest_frame)
+        success = self.engine.capture_background_reference(self.preview_state.latest_frame)
 
         if not success:
             self.log_panel.add_log(
@@ -1211,12 +1164,64 @@ class DetectionController:
 
 
     def arm_detection(self):
-        self.state.detection_enabled = True
+        self.detection_state.detection_enabled = True
         self.control_panel.disable_arm_button()
         self.control_panel.enable_stop_button()
         self.log_panel.add_log(
             Messages.DETECTION_ARMED
         )
+    
+    def stop_preview(self):
+        self.preview_state.preview_enabled = False
+
+        self.control_panel.disable_stop_button()
+
+        self.log_panel.add_log(
+            Messages.PREVIEW_DESTROYED
+        )
+
+
+class PreviewStateController:
+
+    def __init__(
+        self,
+        preview_state: PreviewState,
+        preview_controller: "PreviewController",
+        control_panel: ControlPanel,
+        log_panel: LogPanel):
+
+        self.preview_state = preview_state
+        self.preview_controller = preview_controller
+        self.control_panel = control_panel
+        self.log_panel = log_panel
+       
+    def toggle_preview(self):
+
+        if self.preview_state.preview_enabled:
+
+            self.preview_state.preview_enabled = False
+
+            self.preview_controller.stop_preview()
+
+            self.control_panel.stop_button.config(
+                text="Resume Preview"
+            )
+
+            self.log_panel.add_log(
+                Messages.PREVIEW_DESTROYED
+            )
+
+        else:
+
+            self.preview_state.preview_enabled = True
+
+            self.control_panel.stop_button.config(
+                text="Stop Preview"
+            )
+
+            self.log_panel.add_log(
+                "Preview resumed"
+            )
 
 
 class CoordinateParser:
@@ -1282,28 +1287,23 @@ class RailwayDetectionEngine:
             self.occupancy_analyzer
         )
 
-        self.zone_manager = ZoneManager(
-            self.zone_repository,
-            self.zone_processor
-        )
 
     def process_detection(
         self,
         frame: np.ndarray,
-        detection_enabled: bool
-    ) -> list[tuple[str, str]]:
+        detection_enabled: bool) -> DetectionResult:
 
-        self.detector.process_frame(frame)
+        frame_context = self.detector.process_frame(frame)
 
-        if self.detector.background_frame is None:
-            return []
+        if frame_context.motion_mask is None:
+            return DetectionResult(frame_context=frame_context, events=[])
 
-        events = self.zone_manager.process_all_zones(
-            self.detector,
+        events = self.zone_processor.process_all_zones(
+            frame_context,
             detection_enabled
         )
 
-        return events
+        return DetectionResult(frame_context=frame_context, events=events)
 
     def capture_background_reference(self, frame: np.ndarray | None) -> bool:
 
@@ -1321,58 +1321,102 @@ class RailwayDetectionEngine:
 
 
 class PreviewController:
-
     def __init__(
         self,
         renderer: CameraOverlayRenderer,
         camera_panel: CameraPanel,
-        zone_manager: ZoneManager,
-        detector: OccupancyDetector,
+        zone_repository: ZoneRepository,
         mask_renderer: MaskRenderer,
-        state: UIState):
+        detection_state: DetectionState):
 
         self.renderer = renderer
         self.mask_renderer = mask_renderer
         self.camera_panel = camera_panel
-        self.zone_manager = zone_manager
-        self.detector = detector
-        self.state = state
-        self.presenter = TkImagePresenter()
-    
+        self.zone_repository = zone_repository
+        self.detection_state = detection_state
+
     # DRAW GUI
-    def update_previews(self, frame: np.ndarray) -> None:
+    def update_previews(self, frame_context: FrameContext) -> None:
 
-        if (
-            not self.state.preview_enabled
-            or self.camera_panel.camera_label is None
-            or self.camera_panel.mask_label is None):
-            return
+        # ============================================
+        # CAMERA OVERLAY
+        # ============================================
 
-        overlay_frame = frame.copy()
+        overlay_frame = frame_context.raw_frame.copy()
 
-        for zone in self.zone_manager.zones:
-            status = self.renderer.get_zone_status_text(
-                zone.occupied
+        for zone in self.zone_repository.zones:
+
+            runtime_state = (
+                self.zone_repository.runtime_states[zone.name]
             )
 
-            self.renderer.draw_zone_overlays(overlay_frame, zone, status)
+            self.renderer.draw_zone_overlay(
+                overlay_frame,
+                zone,
+                runtime_state.occupied
+            )
 
-        self.presenter.update_camera_preview(
-            self.camera_panel.camera_label,
+        overlay_frame = cv2.resize(
+            overlay_frame,
+            (
+                AppConfig.DISPLAY_WIDTH,
+                AppConfig.DISPLAY_HEIGHT
+            )
+        )
+
+        photo = TkImageConverter.to_photo_image(
             overlay_frame
         )
 
-        if self.detector.mask is not None:
+        self.camera_panel.camera_label.config(
+            image=photo
+        )
+
+        self.camera_panel.camera_label.image = photo
+
+        # ============================================
+        # MASK PREVIEW
+        # ============================================
+
+        if frame_context.motion_mask is not None:
+
             mask_frame = self.mask_renderer.render(
-                self.detector.mask,
-                self.zone_manager.zones
+                frame_context.motion_mask,
+                self.zone_repository.zones,
+                self.zone_repository.runtime_states
             )
 
-            self.presenter.update_mask_preview(
-                self.camera_panel.mask_label,
+            mask_frame = cv2.resize(
                 mask_frame,
-                self.state.detection_enabled
+                (
+                    AppConfig.DISPLAY_WIDTH,
+                    AppConfig.DISPLAY_HEIGHT
+                )
             )
+
+            mask_photo = TkImageConverter.to_photo_image(
+                mask_frame
+            )
+
+            self.camera_panel.mask_label.config(
+                image=mask_photo
+            )
+
+            self.camera_panel.mask_label.image = mask_photo
+            
+    def stop_preview(self) -> None:
+
+        if self.camera_panel.camera_label is not None:
+
+            self.camera_panel.camera_label.config(image="")
+            self.camera_panel.camera_label.image = None
+            self.camera_panel.camera_label.update_idletasks()
+
+        if self.camera_panel.mask_label is not None:
+
+            self.camera_panel.mask_label.config(image="")
+            self.camera_panel.mask_label.image = None
+            self.camera_panel.mask_label.update_idletasks()
 
 
 class FrameProcessor:
@@ -1382,99 +1426,106 @@ class FrameProcessor:
         engine: RailwayDetectionEngine,
         preview_controller: PreviewController,
         log_panel: LogPanel,
-        state: UIState):
+        detection_state: DetectionState,
+        preview_state: PreviewState):
 
         self.engine = engine
         self.preview_controller = preview_controller
         self.log_panel = log_panel
-        self.state = state
+        self.detection_state = detection_state
+        self.preview_state = preview_state
 
     def process_frame(
         self,
         frame: np.ndarray) -> None:
 
-        self.run_detection_cycle(frame)
+        detection_result = self.run_detection_cycle(frame)
+        frame_context = (detection_result.frame_context)
+        events = detection_result.events
+        self.handle_events(events)
 
-        if not self.state.preview_enabled:
+        if not self.preview_state.preview_enabled:
             return
 
         try:
-            self.preview_controller.update_previews(frame)
+            self.preview_controller.update_previews(
+                frame_context
+            )
 
         except Exception:
             self.log_panel.add_log(
                 traceback.format_exc()
             )
 
-    def run_detection_cycle(
-        self,
-        frame: np.ndarray) -> None:
-
-        events = self.engine.process_detection(
+    def run_detection_cycle(self, frame: np.ndarray) -> DetectionResult:
+        return self.engine.process_detection(
             frame,
-            self.state.detection_enabled
+            self.detection_state.detection_enabled
         )
 
+    def handle_events(self, events: list[tuple[str, str]]) -> None:
+
         for event_type, zone_name in events:
-
-            if event_type == EventType.ENTERED:
-                message = f"Object ENTERED {zone_name}"
-            else:
-                message = f"Object EXITED {zone_name}"
-
+            message = EventFormatter.format(
+                event_type,
+                zone_name
+            )
             self.log_panel.add_log(message)
 
 
-@dataclass
-class ApplicationServices:
-    state: UIState
-    engine: RailwayDetectionEngine
-    layout_persistence: LayoutPersistence
-    log_panel: LogPanel
-    control_panel: ControlPanel
-    camera_panel: CameraPanel
-    zone_editor_panel: ZoneEditorPanel
-    zone_editor_controller: ZoneEditorController
-    detection_controller: DetectionController
-    preview_controller: PreviewController
-    frame_processor: FrameProcessor
-    camera_service: CameraService
-
-
 class ApplicationLoop:
+
     def __init__(
         self,
         root: tk.Tk,
-        services: ApplicationServices):
+        camera_service: CameraService,
+        frame_processor: FrameProcessor,
+        preview_state: PreviewState,
+        log_panel: LogPanel):
 
         self.root = root
-        self.services = services
-        self.running = True
+        self.camera_service = camera_service
+        self.frame_processor = frame_processor
+        self.preview_state = preview_state
+        self.log_panel = log_panel
 
-        # MAIN APPLICATION LOOP
+        self.running = True
+        self.camera_failure_logged = False
+
+    # MAIN APPLICATION LOOP
     def run_frame_loop(self) -> None:
+
         if not self.running:
             return
+
         frame = self.capture_frame()
 
         if frame is not None:
-            self.services.frame_processor.process_frame(frame)
-            self.services.state.latest_frame = frame
+
+            self.frame_processor.process_frame(frame)
+
+            self.preview_state.latest_frame = frame
 
         self.schedule_next_update()
 
     def capture_frame(self) -> np.ndarray | None:
 
         try:
-            return self.services.camera_service.capture_frame()
-        except Exception:
-            self.services.log_panel.add_log(
-                Messages.PREVIEW_UPDATE_FAILED
-            )
+            return self.camera_service.capture_frame()
 
-            self.services.log_panel.add_log(
-                traceback.format_exc()
-            )
+        except Exception:
+
+            if not self.camera_failure_logged:
+
+                self.log_panel.add_log(
+                    Messages.PREVIEW_UPDATE_FAILED
+                )
+
+                self.log_panel.add_log(
+                    traceback.format_exc()
+                )
+
+                self.camera_failure_logged = True
 
             return None
 
@@ -1486,21 +1537,37 @@ class ApplicationLoop:
         )
 
     def quit_program(self):
+
         self.running = False
-        self.services.log_panel.add_log(Messages.EXITING)
+
+        self.log_panel.add_log(
+            Messages.EXITING
+        )
+
         try:
-            self.services.camera_service.stop()
+            self.camera_service.stop()
+
         except Exception:
-            self.log_panel.add_log(traceback.format_exc())
+
+            self.log_panel.add_log(
+                traceback.format_exc()
+            )
+
         finally:
+
             self.root.quit()
+
             self.root.destroy()
 
 
 class RailwayDetectorApp:
     def __init__(self):
 
-        self.state = UIState()
+        self.detection_state = DetectionState()
+
+        self.preview_state = PreviewState()
+
+        self.editor_state = EditorState()
 
         self.engine = RailwayDetectionEngine()
 
@@ -1515,18 +1582,19 @@ class RailwayDetectorApp:
         self.zone_editor_panel = ZoneEditorPanel()
 
         self.zone_editor_controller = ZoneEditorController(
-            self.engine.zone_manager,
+            self.engine.zone_repository,
             self.zone_editor_panel,
             self.log_panel,
             self.camera_panel,
-            self.state
+            self.editor_state
         )
 
         self.detection_controller = DetectionController(
             self.engine,
             self.control_panel,
             self.log_panel,
-            self.state
+            self.detection_state,
+            self.preview_state
         )
 
         self.camera_overlay_renderer = CameraOverlayRenderer()
@@ -1536,17 +1604,24 @@ class RailwayDetectorApp:
         self.preview_controller = PreviewController(
             self.camera_overlay_renderer,
             self.camera_panel,
-            self.engine.zone_manager,
-            self.engine.detector,
+            self.engine.zone_repository,
             self.mask_renderer,
-            self.state
+            self.detection_state
+        )
+
+        self.preview_state_controller = PreviewStateController(
+            self.preview_state,
+            self.preview_controller,
+            self.control_panel,
+            self.log_panel
         )
 
         self.frame_processor = FrameProcessor(
             self.engine,
             self.preview_controller,
             self.log_panel,
-            self.state
+            self.detection_state,
+            self.preview_state
         )
 
         self.camera_service = CameraService()
@@ -1557,20 +1632,10 @@ class RailwayDetectorApp:
 
         self.application_loop = ApplicationLoop(
             self.root,
-            ApplicationServices(
-                state=self.state,
-                engine=self.engine,
-                layout_persistence=self.layout_persistence,
-                log_panel=self.log_panel,
-                control_panel=self.control_panel,
-                camera_panel=self.camera_panel,
-                zone_editor_panel=self.zone_editor_panel,
-                zone_editor_controller=self.zone_editor_controller,
-                detection_controller=self.detection_controller,
-                preview_controller=self.preview_controller,
-                frame_processor=self.frame_processor,
-                camera_service=self.camera_service
-            )
+            self.camera_service,
+            self.frame_processor,
+            self.preview_state,
+            self.log_panel
         )
 
         self.bind_events()
@@ -1635,6 +1700,10 @@ class RailwayDetectorApp:
             command=self.application_loop.quit_program
         )
 
+        self.control_panel.stop_button.config(
+            command=self.preview_state_controller.toggle_preview
+        )
+
         self.zone_editor_panel.apply_button.config(
             command=self.zone_editor_controller.apply_zone_changes
         )
@@ -1672,7 +1741,10 @@ class RailwayDetectorApp:
         if not file_path:
             return
 
-        self.layout_persistence.save_layout(file_path, self.engine.zone_manager.zones)
+        self.layout_persistence.save_layout(
+            file_path,
+            self.engine.zone_repository.zones
+        )
         self.log_panel.add_log(Messages.LAYOUT_SAVED)
     
     def load_layout_gui(self) -> None:
@@ -1685,7 +1757,7 @@ class RailwayDetectorApp:
 
         try:
             zones = self.layout_persistence.load_layout(file_path)
-            self.engine.zone_manager.set_zones(zones)
+            self.engine.zone_repository.set_zones(zones)
         except json.JSONDecodeError:
             self.log_panel.add_log(
                 Messages.INVALID_JSON_FILE
@@ -1715,8 +1787,8 @@ class ZoneGeometry:
 
 
 class ZoneGeometryBuilder:
+    @staticmethod
     def build(
-        self,
         points: list[list[int]]) -> ZoneGeometry:
 
         points_np = np.array(
@@ -1754,53 +1826,22 @@ class Zone:
     name: str
     points: list[list[int]]
 
-    occupied: bool = False
-    occupancy_pixels: int = 0
-    occupancy_ratio: float = 0
-
     def __post_init__(self):
         self.rebuild_polygon()
 
     def update_points(
         self,
-        new_points: list[list[int]]) -> None:
+        new_points: list[list[int]]
+    ) -> None:
 
         self.points = new_points
 
         # Rebuild cached geometry
         self.rebuild_polygon()
 
-    def update_occupancy(
-        self,
-        occupied: bool,
-        occupancy_pixels: int,
-        occupancy_ratio: float) -> None:
-
-        self.occupied = occupied
-        self.occupancy_pixels = occupancy_pixels
-        self.occupancy_ratio = occupancy_ratio
-
-    def apply_analysis(
-        self,
-        result: OccupancyResult) -> None:
-
-        self.occupied = result.occupied
-        self.occupancy_pixels = result.occupancy_pixels
-        self.occupancy_ratio = result.occupancy_ratio
-
-    @property
-    def color(self) -> tuple[int, int, int]:
-
-        if self.occupied:
-            return AppConfig.COLOR_RED
-
-        return AppConfig.COLOR_GREEN
-    
     def rebuild_polygon(self) -> None:
 
-        builder = ZoneGeometryBuilder()
-
-        self.geometry = builder.build(
+        self.geometry = ZoneGeometryBuilder.build(
             self.points
         )
 
@@ -1900,8 +1941,8 @@ class ToolTip:
         self.widget = widget
         self.text = text
 
-        widget.bind("<Enter>", self.schedule_tooltip)
-        widget.bind("<Leave>", self.hide_tooltip)
+        widget.bind("<Enter>", self.schedule_tooltip, add="+")
+        widget.bind("<Leave>", self.hide_tooltip, add="+")
 
         self._tooltip = None
         self._after_id = None
