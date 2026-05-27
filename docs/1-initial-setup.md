@@ -21,7 +21,7 @@ rpicam-hello
 A short live camera preview will open up
 
 4. Test camera by python
-Run python script test1_camera.py
+Run python script test01_camera.py
 A live camera preview will open up. Press Q to quit.
 Use resolution 1280×720 or 640×480. Higher resolution increases CPU massively.
 Until now, verified: Pi -> Camera -> Python -> OpenCV -> Live Frames

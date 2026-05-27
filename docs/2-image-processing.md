@@ -1,5 +1,5 @@
 1. Visualize detection zones
-Run python script test2_detection_zones.py
+Run python script test02_detection_zones.py
 A live camera preview with overlayed image:
 - a rectangle drawn on screen
 - named detection zone
@@ -16,7 +16,7 @@ Setup test:
 - Keep lighting stable
 - Avoid moving hand/objects in frame
 
-Run python script test3_background_subtraction.py
+Run python script test03_background_subtraction.py
 Two windows will open one window with camera image with overlayed green rectangle waiting B key to be pressed. when the key is pressed the image will be kept as background and all future images will be complared against it. A second window opens with foreground mask, black = background, white = detected changes
 
 Test 1: Move a train inside zone and stop it there. The occupancy text should change to OCCUPIED and remains.
@@ -36,16 +36,16 @@ STEP 8 — Decide occupancy
 Until now, verified: camera-based virtual occupancy detection
 
 3. Image noise cleanup
-Setup the same test as 2. and run python script test4_remove_noise.py
+Setup the same test as 2. and run python script test04_remove_noise.py
 
 4. Code refactoring
-Setup the same test as 2. and 3. and run python script test5_refactored.py
+Setup the same test as 2. and 3. and run python script test05_refactored.py
 In script added the capability to easy enable/disable image cleanup. Perform tests with both settings by changing
 line 28 to True/False
 
 5. Add multiple zones
-Setup the same test as before and run python script test6_multiple_zones.py.
+Setup the same test as before and run python script test06_multiple_zones.py.
 Zones are defined in a list of dictionaries and any number of zones can be defined as items in the list. Each zone as a dictionary have the required attributes.
 
-6. Setup the same test as before and run python script test7_polygon_zones.py.
+6. Setup the same test as before and run python script test07_polygon_zones.py.
 Zones now can be in any quadrilateral shape
