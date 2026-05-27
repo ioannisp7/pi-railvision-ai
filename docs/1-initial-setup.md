@@ -10,7 +10,7 @@ sudo apt-get update && sudo apt-get full-upgrade -y
 
 Install required packages
 ```bash
-sudo apt install python3-opencv python3-picamera2 -y
+sudo apt install python3-opencv python3-picamera2 python3-pil python3-pil.imagetk -y
 ```
 
 3. Test camera connection
