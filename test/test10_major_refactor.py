@@ -268,6 +268,16 @@ class LayoutPersistence:
 
             if len(zone_data["points"]) != 4:
                 raise ValueError("Zone must contain exactly 4 points")
+            
+            for point in zone_data["points"]:
+                if not isinstance(point, list):
+                    raise ValueError("Point must be a list")
+
+                if len(point) != 2:
+                    raise ValueError("Point must contain x,y")
+
+                if not all(isinstance(v, int) for v in point):
+                    raise ValueError("Point coordinates must be integers")
 
             zone = Zone(
                 zone_data["name"],
@@ -277,6 +287,123 @@ class LayoutPersistence:
             zones.append(zone)
 
         return zones
+
+
+class ControlPanel:
+    def __init__(self):
+        self.capture_button: tk.Button | None = None
+        self.arm_button: tk.Button | None = None
+        self.stop_button: tk.Button | None = None
+        self.load_button: tk.Button | None = None
+        self.save_button: tk.Button | None = None
+        self.quit_button: tk.Button | None = None
+
+    # CREATE BUTTON AREA
+    def create_buttons_area(self, left_frame):
+
+        self.capture_button = tk.Button(
+            left_frame,
+            text="Capture Background",
+            command=None,
+            height=2,
+            width=25
+        )
+
+        self.capture_button.pack(pady=10)
+
+        ToolTip(
+            self.capture_button,
+            "Capture empty railway image as background reference"
+        )
+
+        self.arm_button = tk.Button(
+            left_frame,
+            text="Arm Detection",
+            command=None,
+            height=2,
+            width=25,
+            state=tk.DISABLED
+        )
+
+        self.arm_button.pack(pady=10)
+
+        ToolTip(
+            self.arm_button,
+            "Enable train occupancy detection"
+        )
+
+        self.stop_button = tk.Button(
+            left_frame,
+            text="Stop Preview",
+            command=None,
+            height=2,
+            width=25,
+            state=tk.DISABLED
+        )
+
+        self.stop_button.pack(pady=10)
+
+        ToolTip(
+            self.stop_button,
+            "Close preview updates"
+        )
+
+        self.load_button = tk.Button(
+            left_frame,
+            text="Load Layout",
+            command=None,
+            height=2,
+            width=25
+        )
+
+        self.load_button.pack(pady=10)
+
+        ToolTip(
+            self.load_button,
+            "Load layout from a JSON file"
+        )
+
+        self.save_button = tk.Button(
+            left_frame,
+            text="Save Layout",
+            command=None,
+            height=2,
+            width=25
+        )
+
+        self.save_button.pack(pady=10)
+
+        ToolTip(
+            self.save_button,
+            "Save layout to JSON file"
+        )
+
+        self.quit_button = tk.Button(
+            left_frame,
+            text="Quit",
+            command=None,
+            height=2,
+            width=25
+        )
+
+        self.quit_button.pack(pady=10)
+
+        ToolTip(
+            self.quit_button,
+            "Quit program"
+        )
+    
+    def enable_arm_button(self):
+        self.arm_button.config(state=tk.NORMAL)
+
+    def disable_arm_button(self):
+        self.arm_button.config(state=tk.DISABLED)
+
+    def enable_stop_button(self):
+        self.stop_button.config(state=tk.NORMAL)
+
+    def disable_stop_button(self):
+        self.stop_button.config(state=tk.DISABLED)
 
 
 class ZoneRepository:
@@ -291,9 +418,17 @@ class ZoneRepository:
 
     def update_zone(self, index: int, name: str, points: list[list[int]]) -> None:
         zone = self.zones[index]
+        old_name = zone.name
+
+        runtime_state = self.runtime_states.pop(
+            old_name,
+            ZoneRuntimeState()
+        )
+
         zone.name = name
         zone.update_points(points)
-    
+        self.runtime_states[name] = runtime_state
+
     def delete_zone(self, index: int) -> None:
         zone = self.zones[index]
         if zone.name in self.runtime_states:
@@ -536,6 +671,7 @@ class MaskRenderer:
         else:
             return AppConfig.COLOR_GREEN
 
+
 class CameraPanel:
     def __init__(self):
         self.camera_label: tk.Label | None = None
@@ -680,121 +816,9 @@ class LogPanel:
         )
 
 
-class ControlPanel:
+class FrameStore:
     def __init__(self):
-        self.capture_button: tk.Button | None = None
-        self.arm_button: tk.Button | None = None
-        self.stop_button: tk.Button | None = None
-        self.load_button: tk.Button | None = None
-        self.save_button: tk.Button | None = None
-        self.quit_button: tk.Button | None = None
-
-    # CREATE BUTTON AREA
-    def create_buttons_area(self, left_frame):
-
-        self.capture_button = tk.Button(
-            left_frame,
-            text="Capture Background",
-            command=None,
-            height=2,
-            width=25
-        )
-
-        self.capture_button.pack(pady=10)
-
-        ToolTip(
-            self.capture_button,
-            "Capture empty railway image as background reference"
-        )
-
-        self.arm_button = tk.Button(
-            left_frame,
-            text="Arm Detection",
-            command=None,
-            height=2,
-            width=25,
-            state=tk.DISABLED
-        )
-
-        self.arm_button.pack(pady=10)
-
-        ToolTip(
-            self.arm_button,
-            "Enable train occupancy detection"
-        )
-
-        self.stop_button = tk.Button(
-            left_frame,
-            text="Stop Preview",
-            command=None,
-            height=2,
-            width=25,
-            state=tk.DISABLED
-        )
-
-        self.stop_button.pack(pady=10)
-
-        ToolTip(
-            self.stop_button,
-            "Close preview updates"
-        )
-
-        self.load_button = tk.Button(
-            left_frame,
-            text="Load Layout",
-            command=None,
-            height=2,
-            width=25
-        )
-
-        self.load_button.pack(pady=10)
-
-        ToolTip(
-            self.load_button,
-            "Load layout from a JSON file"
-        )
-
-        self.save_button = tk.Button(
-            left_frame,
-            text="Save Layout",
-            command=None,
-            height=2,
-            width=25
-        )
-
-        self.save_button.pack(pady=10)
-
-        ToolTip(
-            self.save_button,
-            "Save layout to JSON file"
-        )
-
-        self.quit_button = tk.Button(
-            left_frame,
-            text="Quit",
-            command=None,
-            height=2,
-            width=25
-        )
-
-        self.quit_button.pack(pady=10)
-
-        ToolTip(
-            self.quit_button,
-            "Quit program"
-        )
-    
-    def enable_arm_button(self):
-        self.arm_button.config(state=tk.NORMAL)
-
-    def disable_arm_button(self):
-        self.arm_button.config(state=tk.DISABLED)
-
-    def enable_stop_button(self):
-        self.stop_button.config(state=tk.NORMAL)
-
-    def disable_stop_button(self):
-        self.stop_button.config(state=tk.DISABLED)
+        self.latest_frame: np.ndarray | None = None
 
 
 class ZoneEditorPanel:
@@ -958,7 +982,6 @@ class PreviewState:
 
     def __init__(self):
         self.preview_enabled = True
-        self.latest_frame = None
 
 
 class EditorState:
@@ -1130,25 +1153,25 @@ class ZoneEditorController:
 
 
 class DetectionController:
-
     def __init__(
         self,
         engine: "RailwayDetectionEngine",
-        control_panel: ControlPanel,
+        control_panel: "ControlPanel",
         log_panel: LogPanel,
         detection_state: DetectionState,
-        preview_state: PreviewState):
+        frame_store: FrameStore):
 
         self.engine = engine
         self.control_panel = control_panel
         self.log_panel = log_panel
         self.detection_state = detection_state
-        self.preview_state = preview_state
-
+        self.frame_store = frame_store
 
     def capture_background(self):
 
-        success = self.engine.capture_background_reference(self.preview_state.latest_frame)
+        success = self.engine.capture_background_reference(
+            self.frame_store.latest_frame
+        )
 
         if not success:
             self.log_panel.add_log(
@@ -1162,22 +1185,12 @@ class DetectionController:
             Messages.BACKGROUND_CAPTURED
         )
 
-
     def arm_detection(self):
         self.detection_state.detection_enabled = True
         self.control_panel.disable_arm_button()
         self.control_panel.enable_stop_button()
         self.log_panel.add_log(
             Messages.DETECTION_ARMED
-        )
-    
-    def stop_preview(self):
-        self.preview_state.preview_enabled = False
-
-        self.control_panel.disable_stop_button()
-
-        self.log_panel.add_log(
-            Messages.PREVIEW_DESTROYED
         )
 
 
@@ -1186,8 +1199,8 @@ class PreviewStateController:
     def __init__(
         self,
         preview_state: PreviewState,
-        preview_controller: "PreviewController",
-        control_panel: ControlPanel,
+        preview_controller: "PreviewPresenter",
+        control_panel: "ControlPanel",
         log_panel: LogPanel):
 
         self.preview_state = preview_state
@@ -1320,23 +1333,27 @@ class RailwayDetectionEngine:
         return True
 
 
-class PreviewController:
+class PreviewPresenter:
     def __init__(
         self,
         renderer: CameraOverlayRenderer,
         camera_panel: CameraPanel,
         zone_repository: ZoneRepository,
         mask_renderer: MaskRenderer,
+        preview_state: PreviewState,
         detection_state: DetectionState):
 
         self.renderer = renderer
         self.mask_renderer = mask_renderer
         self.camera_panel = camera_panel
         self.zone_repository = zone_repository
+        self.preview_state = preview_state
         self.detection_state = detection_state
 
     # DRAW GUI
     def update_previews(self, frame_context: FrameContext) -> None:
+        if not self.preview_state.preview_enabled:
+            return
 
         # ============================================
         # CAMERA OVERLAY
@@ -1378,7 +1395,8 @@ class PreviewController:
         # MASK PREVIEW
         # ============================================
 
-        if frame_context.motion_mask is not None:
+        if (self.detection_state.detection_enabled
+        and frame_context.motion_mask is not None):
 
             mask_frame = self.mask_renderer.render(
                 frame_context.motion_mask,
@@ -1403,7 +1421,7 @@ class PreviewController:
             )
 
             self.camera_panel.mask_label.image = mask_photo
-            
+
     def stop_preview(self) -> None:
 
         if self.camera_panel.camera_label is not None:
@@ -1424,7 +1442,7 @@ class FrameProcessor:
     def __init__(
         self,
         engine: RailwayDetectionEngine,
-        preview_controller: PreviewController,
+        preview_controller: PreviewPresenter,
         log_panel: LogPanel,
         detection_state: DetectionState,
         preview_state: PreviewState):
@@ -1443,9 +1461,6 @@ class FrameProcessor:
         frame_context = (detection_result.frame_context)
         events = detection_result.events
         self.handle_events(events)
-
-        if not self.preview_state.preview_enabled:
-            return
 
         try:
             self.preview_controller.update_previews(
@@ -1474,19 +1489,18 @@ class FrameProcessor:
 
 
 class ApplicationLoop:
-
     def __init__(
         self,
         root: tk.Tk,
         camera_service: CameraService,
         frame_processor: FrameProcessor,
-        preview_state: PreviewState,
+        frame_store: FrameStore,
         log_panel: LogPanel):
 
         self.root = root
         self.camera_service = camera_service
         self.frame_processor = frame_processor
-        self.preview_state = preview_state
+        self.frame_store = frame_store
         self.log_panel = log_panel
 
         self.running = True
@@ -1501,11 +1515,8 @@ class ApplicationLoop:
         frame = self.capture_frame()
 
         if frame is not None:
-
             self.frame_processor.process_frame(frame)
-
-            self.preview_state.latest_frame = frame
-
+            self.frame_store.latest_frame = frame
         self.schedule_next_update()
 
     def capture_frame(self) -> np.ndarray | None:
@@ -1562,25 +1573,16 @@ class ApplicationLoop:
 
 class RailwayDetectorApp:
     def __init__(self):
-
         self.detection_state = DetectionState()
-
         self.preview_state = PreviewState()
-
+        self.frame_store = FrameStore()
         self.editor_state = EditorState()
-
         self.engine = RailwayDetectionEngine()
-
         self.layout_persistence = LayoutPersistence()
-
         self.log_panel = LogPanel()
-
         self.control_panel = ControlPanel()
-
         self.camera_panel = CameraPanel()
-
         self.zone_editor_panel = ZoneEditorPanel()
-
         self.zone_editor_controller = ZoneEditorController(
             self.engine.zone_repository,
             self.zone_editor_panel,
@@ -1588,34 +1590,29 @@ class RailwayDetectorApp:
             self.camera_panel,
             self.editor_state
         )
-
         self.detection_controller = DetectionController(
             self.engine,
             self.control_panel,
             self.log_panel,
             self.detection_state,
-            self.preview_state
+            self.frame_store
         )
-
         self.camera_overlay_renderer = CameraOverlayRenderer()
-
         self.mask_renderer = MaskRenderer()
-
-        self.preview_controller = PreviewController(
+        self.preview_controller = PreviewPresenter(
             self.camera_overlay_renderer,
             self.camera_panel,
             self.engine.zone_repository,
             self.mask_renderer,
+            self.preview_state,
             self.detection_state
         )
-
         self.preview_state_controller = PreviewStateController(
             self.preview_state,
             self.preview_controller,
             self.control_panel,
             self.log_panel
         )
-
         self.frame_processor = FrameProcessor(
             self.engine,
             self.preview_controller,
@@ -1623,21 +1620,16 @@ class RailwayDetectorApp:
             self.detection_state,
             self.preview_state
         )
-
         self.camera_service = CameraService()
-
         self.camera_service.start()
-
         self.root = self.create_tkinter_gui()
-
         self.application_loop = ApplicationLoop(
             self.root,
             self.camera_service,
             self.frame_processor,
-            self.preview_state,
+            self.frame_store,
             self.log_panel
         )
-
         self.bind_events()
 
     def create_tkinter_gui(self) -> tk.Tk:
