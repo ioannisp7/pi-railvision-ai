@@ -1,5 +1,4 @@
 # Initial test. Verifies that camera is accessible by code
-
 from picamera2 import Picamera2
 import cv2
 

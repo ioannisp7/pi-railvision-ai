@@ -1,4 +1,4 @@
-# Added GUI and buttons. Added the ability to save and load zones' coordinates
+# Added GUI and buttons. Added the ability to save and load zone coordinates
 from picamera2 import Picamera2
 import cv2
 import numpy as np

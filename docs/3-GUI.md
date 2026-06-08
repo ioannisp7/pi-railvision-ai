@@ -1,8 +1,5 @@
-1. Added GUI and buttons. Added the ability to save and load zones' coordinates
-Setup the same test as before and run python script test8_GUI.py
+1. Added GUI and buttons. Added the ability to save and load zone coordinates
+Setup test and run python script 08_GUI.py
 
-2. Consolidated all program winodws to one window.
-Setup the same test as before and run python script test9_consolidate_GUI.py
-
-3. Performed major refactor of the program and distinction in classes.
-Setup the same test as before and run python script test10_major_refactor.py
+2. Consolidated all program windows to one window.
+Setup test and run python script 09_consolidate_GUI.py
