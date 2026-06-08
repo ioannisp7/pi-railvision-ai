@@ -1,4 +1,4 @@
-# Full re-factoring of the code
+# Full re-factoring of the code limiting the number of classes
 from picamera2 import Picamera2
 import cv2
 import numpy as np
