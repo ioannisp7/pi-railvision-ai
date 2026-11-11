@@ -1,0 +1,3 @@
+[submodule "modules/pi-detection-zones"]
+	path = modules/pi-detection-zones
+	url = https://github.com/ioannisp7/pi-detection-zones.git
