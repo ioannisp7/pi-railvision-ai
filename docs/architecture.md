@@ -1,4 +1,4 @@
-The architecture of the project have 5 layers of development:
+The architecture of the project has 5 layers of development:
 
 Layer 1 — Cameras
 Cameras continuously send frames to the Pi. They observe:
