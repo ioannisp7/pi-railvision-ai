@@ -1,0 +1,22 @@
+# Kiro IDE - keep steering instructions private
+.kiro/
+
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# IDE / editor files
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Local logs
+*.log

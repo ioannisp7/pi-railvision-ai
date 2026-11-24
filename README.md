@@ -25,5 +25,27 @@ Early development / experimental stage.
 - OpenCV / computer vision libraries
 - Machine learning models (TBD)
 
+## Setup
+Requires Raspberry Pi OS with desktop and a Pi camera module.
+
+```bash
+sudo apt install python3-picamera2 python3-opencv python3-pil python3-pil.imagetk python3-tk -y
+git clone --recurse-submodules https://github.com/ioannisp7/pi-railvision-ai.git
+```
+
+If the repository was cloned without submodules:
+
+```bash
+git submodule update --init
+```
+
+## Running
+Run from inside `src/`, because the detection module path is relative to the working directory:
+
+```bash
+cd src
+python3 pi_railvision_ai.py
+```
+
 ## Notes
 This is a personal hobby project for learning and experimentation.
