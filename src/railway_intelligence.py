@@ -1,7 +1,8 @@
 class RailwayIntelligence:
 
-    def __init__(self):
+    def __init__(self, railway_elements):
         self.zone_states = {}
+        self.railway_elements = railway_elements
         self.message_callback = None
 
     def set_message_callback(self, callback):
